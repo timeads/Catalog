@@ -24,6 +24,13 @@ own.
 - **Search & organize**: instant accent-insensitive full-text search across
   every field, kind filters, free-form shelves/tags, grid or list layouts,
   and sorting.
+- **Values for the rare stuff**: each item page has a Value section with
+  one-tap market lookups — eBay sold listings for everything; Discogs and
+  the Popsike auction archive for records; AbeBooks, BookFinder, and
+  Biblio for books. Add a free Discogs token in Settings and record pages
+  show the live lowest asking price and copies-for-sale count. Store an
+  estimated value per item and the Home screen totals the collection
+  (values also export in the CSV — handy for insurance).
 - **Sync between devices** (optional): phone and desktop stay matching
   through a private GitHub repository — see below.
 - **Backup & export**: one-tap JSON backup (covers included) and CSV export.

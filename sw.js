@@ -2,7 +2,7 @@
 // connection. Metadata lookups stay network-only; covers and fonts are cached
 // as they're fetched.
 
-const VERSION = 'stacks-v5';
+const VERSION = 'stacks-v6';
 const SHELL = [
   './',
   'index.html',
@@ -12,6 +12,7 @@ const SHELL = [
   'js/lookup.js',
   'js/scanner.js',
   'js/sync.js',
+  'js/value.js',
   'vendor/zxing.min.js',
   'manifest.webmanifest',
   'icons/icon.svg',

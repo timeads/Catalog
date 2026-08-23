@@ -97,6 +97,10 @@
         <span class="stat-num" id="stat-shelves">0</span>
         <span class="stat-label">Shelves</span>
       </a>
+      <a class="stat-card" href="#/library" id="stat-value-card" hidden>
+        <span class="stat-num" id="stat-value">$0</span>
+        <span class="stat-label">Est. value</span>
+      </a>
     </div>
 
     <div class="quick-actions">
@@ -271,6 +275,10 @@
         </label>
       </div>
       <label class="field">
+        <span class="field-label">Estimated value <em>USD, optional</em></span>
+        <input name="value" type="text" inputmode="decimal" autocomplete="off" placeholder="120">
+      </label>
+      <label class="field">
         <span class="field-label">Shelves &amp; tags <em>comma-separated</em></span>
         <input name="tags" type="text" autocomplete="off" placeholder="jazz, first pressings, to lend">
       </label>
@@ -299,6 +307,9 @@
 
     <h2 class="settings-heading">Sync between devices</h2>
     <div id="sync-panel" class="panel"></div>
+
+    <h2 class="settings-heading">Record prices (Discogs)</h2>
+    <div id="discogs-panel" class="panel"></div>
 
     <h2 class="settings-heading">Backup &amp; export</h2>
     <div class="panel">

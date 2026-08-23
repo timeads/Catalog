@@ -2,6 +2,7 @@ import { getAllItems, putItem, deleteItem, newItem, newPhoto, migrateItem } from
 import { lookupBarcode, searchBooks, searchRecords, fetchTracks, findArchivePhotos } from './lookup.js';
 import { startScanner } from './scanner.js';
 import { getSyncConfig, setSyncConfig, lastSyncedAt, recordTombstone, syncNow } from './sync.js';
+import { getDiscogsToken, setDiscogsToken, parseValue, fmtMoney, marketLinks, discogsStats } from './value.js';
 
 /* ---------------- state ---------------- */
 
@@ -217,6 +218,9 @@ function renderHome() {
   $('#stat-records').textContent = records;
   $('#stat-books').textContent = items.length - records;
   $('#stat-shelves').textContent = [...new Set(items.flatMap((i) => i.tags || []))].length;
+  const total = items.reduce((sum, i) => sum + parseValue(i.value), 0);
+  $('#stat-value-card').hidden = total <= 0;
+  if (total > 0) $('#stat-value').textContent = fmtMoney(total);
 
   const recent = [...items]
     .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
@@ -410,7 +414,7 @@ function renderForm() {
   $('#form-title').textContent = isEdit ? 'Edit item'
     : draft.title ? 'Check & save' : 'New item';
   setFormKind(draft.kind);
-  for (const name of ['title', 'creator', 'year', 'format', 'publisher', 'genre', 'barcode', 'condition', 'notes']) {
+  for (const name of ['title', 'creator', 'year', 'format', 'publisher', 'genre', 'barcode', 'condition', 'notes', 'value']) {
     form.elements[name].value = draft[name] || '';
   }
   form.elements.tags.value = (draft.tags || []).join(', ');
@@ -481,6 +485,11 @@ async function saveForm(ev) {
   for (const name of ['creator', 'year', 'format', 'publisher', 'genre', 'barcode', 'condition', 'notes']) {
     draft[name] = form.elements[name].value.trim();
   }
+  const newValue = form.elements.value.value.trim();
+  if (newValue !== (draft.value || '')) {
+    draft.valueDate = newValue ? new Date().toISOString() : '';
+  }
+  draft.value = newValue;
   draft.title = title;
   draft.tags = form.elements.tags.value.split(',').map((t) => t.trim()).filter(Boolean);
   draft.updatedAt = new Date().toISOString();
@@ -602,6 +611,24 @@ function renderDetail(item) {
     <p id="archive-status" class="scan-status" hidden></p>
     <div id="archive-results" class="archive-grid" hidden></div>`;
 
+  const estValue = parseValue(item.value);
+  const valueSection = `
+    <div class="detail-section-head">
+      <h2>Value</h2>
+      ${estValue > 0 ? `<span class="total-time">${fmtMoney(estValue)}${item.valueDate
+        ? ` · as of ${new Date(item.valueDate).toLocaleDateString()}` : ''}</span>` : ''}
+    </div>
+    <div class="value-panel">
+      ${item.kind === 'record' ? '<p id="discogs-price" class="value-live"></p>' : ''}
+      <div class="market-links">
+        ${marketLinks(item).map((l) =>
+          `<a class="chip" href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.label)} ↗</a>`).join('')}
+      </div>
+      <p class="aside-note">${estValue > 0
+        ? 'Check the markets now and then and update the estimate in Edit.'
+        : 'Check the markets, then record an estimated value in Edit — the Home screen totals it across the collection.'}</p>
+    </div>`;
+
   $('#detail-card').innerHTML = `
     <div class="detail-top">
       <div class="detail-cover">${shown ? photoImgHtml(shown, item) : placeholderHtml(item)}</div>
@@ -618,6 +645,7 @@ function renderDetail(item) {
       </div>
     </div>
     ${photoSection}
+    ${valueSection}
     ${tracklist}
     <dl class="detail-fields">
       ${rows.map(([k, v, cls]) => `<div><dt>${esc(k)}</dt><dd${cls ? ` class="${cls}"` : ''}>${esc(v)}</dd></div>`).join('')}
@@ -626,6 +654,7 @@ function renderDetail(item) {
     </dl>`;
 
   bindDetailPhotoEvents(item, shown);
+  if (item.kind === 'record') renderDiscogsPrice(item);
 
   $('#detail-delete').onclick = async () => {
     if (!confirm(`Remove “${item.title}” from the catalog?`)) return;
@@ -707,6 +736,56 @@ async function runArchiveSearch(item) {
       runArchiveSearch(item); // keep the remaining archive images on screen
     });
   });
+}
+
+/* ---------------- live record prices ---------------- */
+
+const discogsCache = new Map(); // item id -> stats (or null) for this session
+
+function paintDiscogs(el, stats) {
+  if (!stats) {
+    el.textContent = 'Not matched on Discogs — try the search link below.';
+    return;
+  }
+  const price = stats.lowestPrice != null
+    ? `Lowest ask ${fmtMoney(stats.lowestPrice)}`
+    : 'No copies for sale right now';
+  el.innerHTML = `${esc(price)}${stats.numForSale ? ` · ${stats.numForSale} for sale` : ''}
+    · <a href="${esc(stats.url)}" target="_blank" rel="noopener">view on Discogs ↗</a>`;
+}
+
+async function renderDiscogsPrice(item) {
+  const el = $('#discogs-price');
+  if (!el) return;
+  const token = getDiscogsToken();
+  if (!token) {
+    el.innerHTML = 'Live prices: add a free Discogs token in <a href="#/settings">Settings</a>.';
+    return;
+  }
+  if (discogsCache.has(item.id)) {
+    paintDiscogs(el, discogsCache.get(item.id));
+    return;
+  }
+  el.textContent = 'Checking Discogs…';
+  let stats = null;
+  let error = null;
+  try {
+    stats = await discogsStats(item, token);
+    discogsCache.set(item.id, stats);
+    if (stats && stats.releaseId && item.discogsId !== String(stats.releaseId)) {
+      // Remember the match; no updatedAt bump so edits elsewhere still win.
+      item.discogsId = String(stats.releaseId);
+      await putItem(item);
+    }
+  } catch (err) {
+    error = err.message || 'Discogs is unavailable right now.';
+  }
+  // Only paint if this item's detail page is still on screen.
+  const live = $('#discogs-price');
+  const shownId = (location.hash.match(/^#\/item\/(.*)$/) || [])[1];
+  if (!live || shownId !== item.id) return;
+  if (error) live.textContent = error;
+  else paintDiscogs(live, stats);
 }
 
 // The + tile in the photo strip: add any number of photos at once.
@@ -846,10 +925,48 @@ function renderSettings() {
     });
   }
 
+  renderDiscogsPanel();
+
   const records = items.filter((i) => i.kind === 'record').length;
   $('#backup-stats').innerHTML = `
     <span>${records} records</span><span>${items.length - records} books</span>
     <span>${[...new Set(items.flatMap((i) => i.tags))].length} shelves</span>`;
+}
+
+function renderDiscogsPanel() {
+  const panel = $('#discogs-panel');
+  if (getDiscogsToken()) {
+    panel.innerHTML = `
+      <p class="sync-note">Connected. Record pages now show the current lowest asking price and how many copies are for sale, with a link to that release's full sale history.</p>
+      <div class="form-actions">
+        <button id="discogs-remove" class="btn btn-danger" type="button">Remove token</button>
+      </div>`;
+    $('#discogs-remove').addEventListener('click', () => {
+      setDiscogsToken('');
+      discogsCache.clear();
+      renderDiscogsPanel();
+    });
+  } else {
+    panel.innerHTML = `
+      <p class="aside-note">See live marketplace prices for your records right on their pages. Needs a free Discogs account: generate a personal access token under
+      <a href="https://www.discogs.com/settings/developers" target="_blank" rel="noopener">Discogs → Settings → Developers</a> and paste it here.</p>
+      <label class="field">
+        <span class="field-label">Discogs personal token</span>
+        <input id="discogs-token-input" type="password" autocomplete="off" placeholder="paste token">
+      </label>
+      <div class="form-actions">
+        <button id="discogs-save" class="btn btn-accent" type="button">Save token</button>
+      </div>
+      <p class="sync-note">Stored only in this browser and sent only to api.discogs.com.</p>`;
+    $('#discogs-save').addEventListener('click', () => {
+      const token = $('#discogs-token-input').value.trim();
+      if (!token) { toast('Paste the token first.'); return; }
+      setDiscogsToken(token);
+      discogsCache.clear();
+      renderDiscogsPanel();
+      toast('Discogs connected.');
+    });
+  }
 }
 
 /* ---------------- backup ---------------- */
@@ -894,7 +1011,7 @@ async function exportJson() {
 }
 
 function exportCsv() {
-  const cols = ['kind', 'title', 'creator', 'year', 'format', 'publisher', 'genre', 'condition', 'barcode', 'tags', 'notes', 'createdAt'];
+  const cols = ['kind', 'title', 'creator', 'year', 'format', 'publisher', 'genre', 'condition', 'barcode', 'value', 'valueDate', 'tags', 'notes', 'createdAt'];
   const cell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
   const lines = [cols.join(',')];
   for (const it of items) {

@@ -65,6 +65,9 @@ export function newItem(kind) {
     notes: '',
     tracks: [], // records: [{no, title, ms}] from MusicBrainz
     mbid: '', // MusicBrainz release id, when known
+    discogsId: '', // Discogs release id, once matched
+    value: '', // estimated value, free-form number
+    valueDate: '', // when the estimate was last set
     // photos[0] is the default/cover. Each: {id, blob, url, file, label}
     // where blob is device-local, url is a remote image, file is the
     // sync-repo path once uploaded, label e.g. 'Back'.
