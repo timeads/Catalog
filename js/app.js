@@ -1,6 +1,7 @@
 import { getAllItems, putItem, deleteItem, newItem } from './db.js';
 import { lookupBarcode, searchBooks, searchRecords, fetchTracks } from './lookup.js';
 import { startScanner } from './scanner.js';
+import { getSyncConfig, setSyncConfig, lastSyncedAt, recordTombstone, syncNow } from './sync.js';
 
 /* ---------------- state ---------------- */
 
@@ -12,9 +13,10 @@ let sortBy = 'added';
 let searchKind = 'record'; // online-search toggle
 let draft = null; // item being created/edited in the form
 let stopScan = null; // active scanner's stop()
+let currentView = 'home';
 const coverUrls = new Map(); // item id -> object URL for its cover blob
 
-let viewMode = 'grid'; // collection layout: 'grid' | 'list'
+let viewMode = 'grid'; // library layout: 'grid' | 'list'
 try { viewMode = localStorage.getItem('stacks-view') === 'list' ? 'list' : 'grid'; } catch {}
 
 const $ = (sel) => document.querySelector(sel);
@@ -25,15 +27,14 @@ const FORMAT_OPTIONS = {
   book: ['Hardcover', 'Paperback', 'Trade paperback', 'Mass market', 'Oversize', 'Boxed set', 'Zine', 'Signed'],
 };
 
-// Placeholder cover tones: muted, archival — like cloth bindings and
-// paper record sleeves. [background, initial] pairs.
+// Placeholder cover tones, [background, initial] pairs.
 const PLACEHOLDER_TONES = [
-  ['#2d2d2a', '#e5e2dd'],
-  ['#775a19', '#ffdea5'],
-  ['#474741', '#e5e2de'],
-  ['#8c7a5b', '#fcf9f5'],
-  ['#5c5c56', '#f3f0ec'],
-  ['#3d3a33', '#e9c176'],
+  ['#292524', '#e7e5e4'],
+  ['#7c2d12', '#fed7aa'],
+  ['#44403c', '#e7e5e4'],
+  ['#854d0e', '#fef3c7'],
+  ['#57534e', '#f5f5f4'],
+  ['#431407', '#fdba74'],
 ];
 
 function esc(s) {
@@ -83,31 +84,34 @@ function toast(msg) {
 /* ---------------- routing ---------------- */
 
 const views = {
-  dashboard: $('#view-dashboard'),
-  collection: $('#view-collection'),
-  add: $('#view-add'),
+  home: $('#view-home'),
+  library: $('#view-library'),
   scan: $('#view-scan'),
-  search: $('#view-search'),
+  lookup: $('#view-lookup'),
   form: $('#view-form'),
   detail: $('#view-detail'),
-  backup: $('#view-backup'),
+  settings: $('#view-settings'),
 };
+
+const ROUTE_ALIASES = { collection: 'library', backup: 'settings', search: 'lookup', add: 'sheet' };
 
 function route() {
   const hash = location.hash || '#/';
-  const [, path, arg] = hash.match(/^#\/([a-z]*)\/?(.*)$/) || [null, '', ''];
+  let [, path, arg] = hash.match(/^#\/([a-z]*)\/?(.*)$/) || [null, '', ''];
+  if (ROUTE_ALIASES[path] === 'sheet') { location.hash = '#/'; openSheet(); return; }
+  path = ROUTE_ALIASES[path] || path;
 
   if (stopScan) { stopScan(); stopScan = null; }
+  closeSheet();
   Object.values(views).forEach((v) => { v.hidden = true; });
 
-  let view = 'dashboard';
-  if (path === 'collection') view = 'collection';
-  else if (path === 'add') view = 'add';
+  let view = 'home';
+  if (path === 'library') view = 'library';
   else if (path === 'scan') view = 'scan';
-  else if (path === 'search') view = 'search';
+  else if (path === 'lookup') view = 'lookup';
   else if (path === 'new' || path === 'edit') view = 'form';
   else if (path === 'item') view = 'detail';
-  else if (path === 'backup') view = 'backup';
+  else if (path === 'settings') view = 'settings';
 
   if (view === 'form') {
     if (path === 'edit') {
@@ -124,43 +128,82 @@ function route() {
     if (!item) { location.hash = '#/'; return; }
     renderDetail(item);
   }
-  if (view === 'dashboard') renderDashboard();
-  if (view === 'collection') {
+  if (view === 'home') renderHome();
+  if (view === 'library') {
     if (arg === 'book' || arg === 'record') {
       filterKind = arg;
       $$('.kind-chip[data-kind]').forEach((x) => x.classList.toggle('is-active', x.dataset.kind === arg));
     }
-    renderCollection();
+    renderLibrary();
   }
   if (view === 'scan') beginScan();
-  if (view === 'backup') renderBackup();
+  if (view === 'settings') renderSettings();
   if (view !== 'form' && view !== 'scan') draft = null;
 
+  currentView = view;
   views[view].hidden = false;
   const tab =
-    view === 'dashboard' || view === 'add' ? 'library'
-    : view === 'collection' || view === 'detail' ? 'search'
+    view === 'home' ? 'home'
+    : view === 'library' || view === 'detail' ? 'library'
     : view === 'scan' ? 'scan'
-    : view === 'backup' ? 'backup' : 'library';
-  $$('.tabbar a').forEach((a) => a.classList.toggle('is-active', a.dataset.tab === tab));
+    : view === 'settings' ? 'settings' : '';
+  $$('[data-tab]').forEach((a) => a.classList.toggle('is-active', a.dataset.tab === tab));
   window.scrollTo(0, 0);
 }
 
-/* ---------------- dashboard ---------------- */
+// Re-render whatever is on screen (after sync pulls in changes).
+function rerender() {
+  updateNavCount();
+  if (currentView === 'home') renderHome();
+  if (currentView === 'library') renderLibrary();
+  if (currentView === 'settings') renderSettings();
+  if (currentView === 'detail') {
+    const id = (location.hash.match(/^#\/item\/(.*)$/) || [])[1];
+    const item = items.find((i) => i.id === id);
+    if (item) renderDetail(item); else location.hash = '#/';
+  }
+}
 
-function renderDashboard() {
+function updateNavCount() {
+  const el = $('#nav-count');
+  if (el) el.textContent = items.length || '';
+}
+
+/* ---------------- add sheet ---------------- */
+
+function openSheet() {
+  $('#sheet').hidden = false;
+  $('#sheet-backdrop').hidden = false;
+  requestAnimationFrame(() => {
+    $('#sheet').classList.add('is-open');
+    $('#sheet-backdrop').classList.add('is-open');
+  });
+}
+
+function closeSheet() {
+  const sheet = $('#sheet');
+  if (sheet.hidden) return;
+  sheet.classList.remove('is-open');
+  $('#sheet-backdrop').classList.remove('is-open');
+  setTimeout(() => { sheet.hidden = true; $('#sheet-backdrop').hidden = true; }, 230);
+}
+
+/* ---------------- home ---------------- */
+
+function renderHome() {
   const records = items.filter((i) => i.kind === 'record').length;
-  $('#stat-books').textContent = items.length - records;
   $('#stat-records').textContent = records;
+  $('#stat-books').textContent = items.length - records;
+  $('#stat-shelves').textContent = [...new Set(items.flatMap((i) => i.tags || []))].length;
 
   const recent = [...items]
     .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
     .slice(0, 12);
   const rail = $('#recent-rail');
   const empty = items.length === 0;
-  $('#dash-empty').hidden = !empty;
+  $('#home-empty').hidden = !empty;
   rail.hidden = empty;
-  $('.section-head').hidden = empty;
+  $('#view-home .section-head').hidden = empty;
   rail.innerHTML = recent.map((it) => `
     <a class="rail-card" href="#/item/${it.id}">
       <span class="cover-wrap">
@@ -172,7 +215,7 @@ function renderDashboard() {
     </a>`).join('');
 }
 
-/* ---------------- collection ---------------- */
+/* ---------------- library ---------------- */
 
 // Case- and accent-insensitive ("Café" matches "cafe").
 function fold(s) {
@@ -204,11 +247,9 @@ function cardHtml(it) {
   return `
     <a class="item-card" href="#/item/${it.id}">
       <span class="cover-wrap">${coverHtml(it)}</span>
-      <span class="card-text">
-        <h2 class="card-title">${esc(it.title)}</h2>
-        <p class="card-creator">${esc(it.creator)}</p>
-        <p class="card-meta">${esc([it.year, it.format].filter(Boolean).join(' · ')) || esc(it.kind)}</p>
-      </span>
+      <p class="card-title">${esc(it.title)}</p>
+      <p class="card-creator">${esc(it.creator)}</p>
+      <p class="card-meta">${esc([it.year, it.format].filter(Boolean).join(' · ')) || esc(it.kind)}</p>
     </a>`;
 }
 
@@ -224,16 +265,18 @@ function rowHtml(it) {
     </a>`;
 }
 
-function renderCollection() {
+function renderLibrary() {
   const list = visibleItems();
   const grid = $('#library-grid');
   const records = items.filter((i) => i.kind === 'record').length;
   const books = items.length - records;
+  const filtered = !!(filterTag || filterKind !== 'all' || searchQuery);
 
   $('#library-empty').hidden = items.length > 0;
+  $('#library-noresults').hidden = !(items.length > 0 && list.length === 0);
   $('.library-tools').hidden = items.length === 0;
   $('#library-count').textContent = items.length
-    ? `${list.length} of ${items.length} — ${records} records · ${books} books`
+    ? `${list.length} of ${items.length} · ${records} records · ${books} books`
     : '';
 
   const tags = [...new Set(items.flatMap((i) => i.tags || []))].sort();
@@ -243,12 +286,11 @@ function renderCollection() {
     `<button class="chip${t === filterTag ? ' is-active' : ''}" data-tag="${esc(t)}">${esc(t)}</button>`
   ).join('');
 
-  $('#clear-filters').hidden = !(filterTag || filterKind !== 'all' || searchQuery);
+  $('#clear-filters').hidden = !filtered;
   $('#view-grid-btn').classList.toggle('is-active', viewMode === 'grid');
   $('#view-list-btn').classList.toggle('is-active', viewMode === 'list');
 
   grid.classList.toggle('is-list', viewMode === 'list');
-  grid.classList.toggle('has-featured', viewMode === 'grid' && list.length > 0);
   grid.innerHTML = list.map(viewMode === 'list' ? rowHtml : cardHtml).join('');
 }
 
@@ -355,7 +397,7 @@ function renderFormCover() {
   $('#cover-clear').hidden = !draft.coverBlob && !draft.coverUrl;
 }
 
-// Downscale a photo to a small JPEG blob so backups stay portable.
+// Downscale a photo to a small JPEG blob so sync and backups stay light.
 async function shrinkImage(file, maxSide = 900) {
   const bmp = await createImageBitmap(file);
   const scale = Math.min(1, maxSide / Math.max(bmp.width, bmp.height));
@@ -385,12 +427,13 @@ async function onCoverPicked(ev) {
   renderFormCover();
 }
 
-// "Take a photo" on the Add screen: the shutter IS the entry point — the
+// "Take a photo" in the add sheet: the shutter IS the entry point — the
 // photo becomes the new item's cover, then the form opens for details.
 async function onPhotoPicked(ev) {
   const file = ev.target.files && ev.target.files[0];
   ev.target.value = '';
   if (!file) return;
+  closeSheet();
   draft = newItem('record');
   draft.coverBlob = await fileToCover(file);
   toast('Cover captured — now fill in the details.');
@@ -419,14 +462,16 @@ async function saveForm(ev) {
   coverUrls.delete(draft.id);
   const saved = draft;
   draft = null;
+  updateNavCount();
   toast(`“${saved.title}” is on the shelf.`);
   location.hash = `#/item/${saved.id}`;
   cacheRemoteCover(saved);
+  scheduleSync();
 }
 
 // Pull a looked-up cover into the catalog itself, so the image survives
-// offline and travels with backups. Best effort — some cover hosts don't
-// allow cross-origin reads, and the URL keeps working regardless.
+// offline, syncs, and travels with backups. Best effort — some cover hosts
+// don't allow cross-origin reads, and the URL keeps working regardless.
 async function cacheRemoteCover(item) {
   if (item.coverBlob || !item.coverUrl) return;
   try {
@@ -439,6 +484,7 @@ async function cacheRemoteCover(item) {
     current.coverBlob = blob;
     coverUrls.delete(current.id);
     await putItem(current);
+    scheduleSync();
   } catch {
     // keep the remote URL only
   }
@@ -465,7 +511,7 @@ function renderDetail(item) {
   const tracklist = tracks.length ? `
     <div class="detail-section-head">
       <h2>Tracklist</h2>
-      ${totalMs ? `<span class="total-time">${fmtMs(totalMs)} total time</span>` : ''}
+      ${totalMs ? `<span class="total-time">${fmtMs(totalMs)} total</span>` : ''}
     </div>
     <ol class="tracklist">
       ${tracks.map((t) => `<li>
@@ -476,41 +522,166 @@ function renderDetail(item) {
     </ol>` : '';
 
   $('#detail-card').innerHTML = `
-    <div class="detail-cover">${coverHtml(item)}</div>
-    <div class="detail-actions">
-      <a class="btn btn-primary" href="#/edit/${item.id}">✎ Edit</a>
-      <button id="detail-delete" class="btn btn-danger" type="button">Remove</button>
+    <div class="detail-top">
+      <div class="detail-cover">${coverHtml(item)}</div>
+      <div>
+        <span class="kind-badge">${item.kind}</span>
+        <h1>${esc(item.title)}</h1>
+        <p class="detail-creator">${esc(item.creator)}</p>
+        ${meta.length ? `<div class="detail-meta">
+          ${meta.map((m) => `<span class="meta-chip">${esc(m)}</span>`).join('')}</div>` : ''}
+        <div class="detail-actions">
+          <a class="btn btn-accent" href="#/edit/${item.id}">Edit</a>
+          <button id="detail-delete" class="btn btn-danger" type="button">Remove</button>
+        </div>
+      </div>
     </div>
-    <span class="kind-badge archival-label">${item.kind}</span>
-    <h1>${esc(item.title)}</h1>
-    <p class="detail-creator">${esc(item.creator)}</p>
-    ${meta.length ? `<div class="detail-meta">
-      ${meta.map((m) => `<span class="chip">${esc(m)}</span>`).join('')}</div>` : ''}
     ${tracklist}
     <dl class="detail-fields">
       ${rows.map(([k, v, cls]) => `<div><dt>${esc(k)}</dt><dd${cls ? ` class="${cls}"` : ''}>${esc(v)}</dd></div>`).join('')}
       ${item.tags.length ? `<div><dt>Shelves</dt><dd class="tag-list">
-        ${item.tags.map((t) => `<span class="chip">${esc(t)}</span>`).join('')}</dd></div>` : ''}
+        ${item.tags.map((t) => `<span class="meta-chip">${esc(t)}</span>`).join('')}</dd></div>` : ''}
     </dl>`;
   $('#detail-delete').onclick = async () => {
     if (!confirm(`Remove “${item.title}” from the catalog?`)) return;
     await deleteItem(item.id);
+    recordTombstone(item.id);
     items = items.filter((i) => i.id !== item.id);
     coverUrls.delete(item.id);
+    updateNavCount();
     toast('Removed.');
-    location.hash = '#/collection';
+    location.hash = '#/library';
+    scheduleSync();
   };
 }
 
-/* ---------------- backup ---------------- */
+/* ---------------- sync ---------------- */
 
-function renderBackup() {
+let syncUiState = { status: getSyncConfig() ? 'idle' : 'off', text: '' };
+let syncDebounce = null;
+
+function fmtSyncTime(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  const today = new Date().toDateString() === d.toDateString();
+  return today ? d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : d.toLocaleDateString();
+}
+
+function renderSyncIndicators() {
+  const cfg = getSyncConfig();
+  const last = lastSyncedAt();
+  let dot = 'off';
+  let text = 'Sync off';
+  if (cfg) {
+    if (syncUiState.status === 'syncing') { dot = ''; text = syncUiState.text || 'Syncing…'; }
+    else if (syncUiState.status === 'error') { dot = 'err'; text = 'Sync issue'; }
+    else { dot = ''; text = last ? `Synced ${fmtSyncTime(last)}` : 'Ready to sync'; }
+  }
+  const html = `<span class="sync-dot ${dot}"></span>${esc(text)}`;
+  $('#top-sync').innerHTML = cfg ? html : '';
+  const side = $('#side-sync');
+  side.hidden = false;
+  side.innerHTML = cfg ? html : `<span class="sync-dot off"></span>Sync off — <a href="#/settings">set up</a>`;
+}
+
+function scheduleSync() {
+  if (!getSyncConfig()) return;
+  clearTimeout(syncDebounce);
+  syncDebounce = setTimeout(() => runSync('auto'), 2500);
+}
+
+async function runSync(reason) {
+  if (!getSyncConfig()) return;
+  syncUiState = { status: 'syncing', text: 'Syncing…' };
+  renderSyncIndicators();
+  try {
+    const result = await syncNow((text) => {
+      syncUiState = { status: 'syncing', text };
+      renderSyncIndicators();
+    });
+    syncUiState = { status: 'idle', text: '' };
+    if (result && result.applied) {
+      items = await getAllItems();
+      coverUrls.clear();
+      rerender();
+    }
+    renderSyncIndicators();
+    if (currentView === 'settings') renderSettings();
+    if (reason === 'manual') toast('Synced.');
+  } catch (err) {
+    syncUiState = { status: 'error', text: err.message || 'Sync failed' };
+    renderSyncIndicators();
+    if (currentView === 'settings') renderSettings();
+    if (reason === 'manual') toast(err.message || 'Sync failed.');
+  }
+}
+
+/* ---------------- settings ---------------- */
+
+function renderSettings() {
+  const cfg = getSyncConfig();
+  const panel = $('#sync-panel');
+  if (cfg) {
+    const last = lastSyncedAt();
+    panel.innerHTML = `
+      <div class="sync-status-row">
+        <span class="sync-repo">${esc(cfg.repo)}</span>
+        <span class="sync-note">${syncUiState.status === 'error' ? esc(syncUiState.text)
+          : syncUiState.status === 'syncing' ? 'Syncing…'
+          : last ? `Last synced ${esc(fmtSyncTime(last))}` : 'Not synced yet'}</span>
+      </div>
+      <p class="sync-note">Syncs automatically when the app opens, after every change, and when you come back online. Set up the same repo and token on your other devices and they'll stay matching.</p>
+      <div class="form-actions">
+        <button id="sync-now" class="btn btn-accent" type="button">Sync now</button>
+        <button id="sync-disconnect" class="btn btn-danger" type="button">Disconnect</button>
+      </div>`;
+    $('#sync-now').addEventListener('click', () => runSync('manual'));
+    $('#sync-disconnect').addEventListener('click', () => {
+      if (!confirm('Stop syncing on this device? Your catalog stays here and in the repo.')) return;
+      setSyncConfig(null);
+      syncUiState = { status: 'off', text: '' };
+      renderSettings();
+      renderSyncIndicators();
+    });
+  } else {
+    panel.innerHTML = `
+      <p class="aside-note">Your catalog syncs through a private GitHub repository you own — free, and the data stays yours. One-time setup on each device:</p>
+      <ol class="setup-steps">
+        <li>Create a <strong>private repo</strong> on GitHub, e.g. <code>stacks-data</code> (empty is fine).</li>
+        <li>Create a <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">fine-grained access token</a>: choose <em>Only select repositories</em> → that repo, and under Repository permissions set <strong>Contents</strong> to <strong>Read and write</strong>.</li>
+        <li>Paste both below. On your other device, install the app and paste the same two values.</li>
+      </ol>
+      <label class="field">
+        <span class="field-label">Repository <em>owner/name</em></span>
+        <input id="sync-repo-input" type="text" autocomplete="off" placeholder="yourname/stacks-data">
+      </label>
+      <label class="field">
+        <span class="field-label">Access token</span>
+        <input id="sync-token-input" type="password" autocomplete="off" placeholder="github_pat_…">
+      </label>
+      <div class="form-actions">
+        <button id="sync-connect" class="btn btn-accent" type="button">Connect &amp; sync</button>
+      </div>
+      <p class="sync-note">The token is stored only in this browser and sent only to api.github.com.</p>`;
+    $('#sync-connect').addEventListener('click', async () => {
+      const repo = $('#sync-repo-input').value.trim().replace(/^https:\/\/github\.com\//, '');
+      const token = $('#sync-token-input').value.trim();
+      if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) { toast('Repository should look like owner/name.'); return; }
+      if (!token) { toast('Paste the access token.'); return; }
+      setSyncConfig({ repo, token });
+      renderSettings();
+      renderSyncIndicators();
+      await runSync('manual');
+    });
+  }
+
   const records = items.filter((i) => i.kind === 'record').length;
   $('#backup-stats').innerHTML = `
-    <div><span class="stat-num">${records}</span><span class="stat-label">records</span></div>
-    <div><span class="stat-num">${items.length - records}</span><span class="stat-label">books</span></div>
-    <div><span class="stat-num">${[...new Set(items.flatMap((i) => i.tags))].length}</span><span class="stat-label">shelves</span></div>`;
+    <span>${records} records</span><span>${items.length - records} books</span>
+    <span>${[...new Set(items.flatMap((i) => i.tags))].length} shelves</span>`;
 }
+
+/* ---------------- backup ---------------- */
 
 function download(name, blob) {
   const a = document.createElement('a');
@@ -575,8 +746,10 @@ async function importJson(ev) {
       coverUrls.delete(item.id);
       await putItem(item);
     }
+    updateNavCount();
     toast(`Restored ${added} new item${added === 1 ? '' : 's'}${updated ? `, updated ${updated}` : ''}.`);
-    renderBackup();
+    renderSettings();
+    scheduleSync();
   } catch {
     toast("That file doesn't look like a Stacks backup.");
   }
@@ -587,24 +760,31 @@ async function importJson(ev) {
 function bindEvents() {
   window.addEventListener('hashchange', route);
 
+  document.addEventListener('click', (e) => {
+    if (e.target.closest('[data-open-sheet]')) { openSheet(); return; }
+    if (e.target.closest('[data-close-sheet]')) closeSheet();
+  });
+  $('#sheet-backdrop').addEventListener('click', closeSheet);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSheet(); });
+
   $('#search-input').addEventListener('input', (e) => {
     searchQuery = e.target.value;
-    renderCollection();
+    renderLibrary();
   });
   $('#sort-select').addEventListener('change', (e) => {
     sortBy = e.target.value;
-    renderCollection();
+    renderLibrary();
   });
   $$('.kind-chip[data-kind]').forEach((b) => b.addEventListener('click', () => {
     filterKind = b.dataset.kind;
     $$('.kind-chip[data-kind]').forEach((x) => x.classList.toggle('is-active', x === b));
-    renderCollection();
+    renderLibrary();
   }));
   $('#tag-row').addEventListener('click', (e) => {
     const btn = e.target.closest('[data-tag]');
     if (!btn) return;
     filterTag = filterTag === btn.dataset.tag ? null : btn.dataset.tag;
-    renderCollection();
+    renderLibrary();
   });
   $('#clear-filters').addEventListener('click', () => {
     filterKind = 'all';
@@ -612,7 +792,7 @@ function bindEvents() {
     searchQuery = '';
     $('#search-input').value = '';
     $$('.kind-chip[data-kind]').forEach((x) => x.classList.toggle('is-active', x.dataset.kind === 'all'));
-    renderCollection();
+    renderLibrary();
   });
   $('#view-grid-btn').addEventListener('click', () => setViewMode('grid'));
   $('#view-list-btn').addEventListener('click', () => setViewMode('list'));
@@ -641,27 +821,32 @@ function bindEvents() {
     renderFormCover();
   });
   $('#detail-back').addEventListener('click', () => {
-    if (history.length > 1) history.back(); else location.hash = '#/collection';
+    if (history.length > 1) history.back(); else location.hash = '#/library';
   });
 
   $('#export-json').addEventListener('click', exportJson);
   $('#export-csv').addEventListener('click', exportCsv);
   $('#import-file').addEventListener('change', importJson);
+
+  window.addEventListener('online', () => runSync('auto'));
 }
 
 function setViewMode(mode) {
   viewMode = mode;
   try { localStorage.setItem('stacks-view', mode); } catch {}
-  renderCollection();
+  renderLibrary();
 }
 
 async function main() {
   items = await getAllItems();
   bindEvents();
+  updateNavCount();
+  renderSyncIndicators();
   route();
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
+  if (getSyncConfig() && navigator.onLine !== false) runSync('startup');
 }
 
 main();
