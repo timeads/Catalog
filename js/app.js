@@ -1,5 +1,6 @@
 import { getAllItems, putItem, deleteItem, newItem, newPhoto, migrateItem } from './db.js';
 import { lookupBarcode, searchBooks, searchRecords, fetchTracks, findArchivePhotos } from './lookup.js';
+import { getVisionKey, setVisionKey, identifyPhoto } from './identify.js';
 import { startScanner } from './scanner.js';
 import { getSyncConfig, setSyncConfig, lastSyncedAt, recordTombstone, syncNow } from './sync.js';
 import { getDiscogsToken, setDiscogsToken, parseValue, fmtMoney, marketLinks, discogsStats } from './value.js';
@@ -463,7 +464,8 @@ async function onCoverPicked(ev) {
 }
 
 // "Take a photo" in the add sheet: the shutter IS the entry point — the
-// photo becomes the new item's cover, then the form opens for details.
+// photo becomes the new item's cover. With a Claude API key configured,
+// the photo is identified and everything fills in automatically.
 async function onPhotoPicked(ev) {
   const file = ev.target.files && ev.target.files[0];
   ev.target.value = '';
@@ -472,9 +474,78 @@ async function onPhotoPicked(ev) {
   draft = newItem('record');
   draft.photos = [newPhoto({ blob: await fileToCover(file) })];
   migrateItem(draft);
-  toast('Cover captured — now fill in the details.');
   location.hash = '#/new';
   if (views.form && !views.form.hidden) renderFormCover();
+  if (getVisionKey()) {
+    identifyAndFill(draft);
+  } else {
+    toast('Cover captured — now fill in the details.');
+  }
+}
+
+// The auto-identification pipeline: Claude names the item from the photo,
+// then the open databases fill in the rest — metadata, tracklist, and the
+// archive's front/back images for records.
+async function identifyAndFill(target) {
+  const setStatus = (text) => {
+    if (draft === target && !views.form.hidden) $('#form-title').textContent = text;
+  };
+  setStatus('Identifying photo…');
+  let id = null;
+  try {
+    id = await identifyPhoto(target.photos[0].blob, getVisionKey());
+  } catch (err) {
+    setStatus('New item');
+    toast(err.message || 'Identification failed — fill in the details yourself.');
+    return;
+  }
+  if (!id || !id.title) {
+    setStatus('New item');
+    toast("Couldn't identify the cover — fill in the details yourself.");
+    return;
+  }
+  // Abandon silently if the user already started typing or moved on.
+  if (draft !== target || $('#item-form').elements.title.value.trim()) return;
+
+  target.kind = id.kind || target.kind;
+  target.title = id.title;
+  target.creator = id.creator;
+  target.year = id.year;
+  setStatus('Fetching details…');
+
+  // Confirm against the open databases and pull the rich details.
+  try {
+    const q = [id.creator, id.title].filter(Boolean).join(' ');
+    const results = target.kind === 'book' ? await searchBooks(q) : await searchRecords(q);
+    const best = results[0];
+    if (best && fold(best.title).includes(fold(id.title).slice(0, 12))) {
+      for (const f of ['title', 'creator', 'year', 'format', 'publisher', 'genre', 'mbid']) {
+        if (best[f]) target[f] = best[f];
+      }
+      if (target.kind === 'record' && target.mbid) {
+        target.tracks = (await fetchTracks(target.mbid)) || [];
+        // Bring in the archive's images — front and back of the sleeve.
+        const images = await findArchivePhotos(target).catch(() => []);
+        for (const img of images) {
+          const label = fold(img.label);
+          if (label.includes('front') || label.includes('back')) {
+            target.photos.push(newPhoto({ url: img.url, label: img.label }));
+          }
+        }
+      } else if (best.coverUrl) {
+        target.photos.push(newPhoto({ url: best.coverUrl, label: 'Cover' }));
+      }
+    }
+  } catch {
+    // identification alone is still worth prefilling
+  }
+
+  if (draft === target && !views.form.hidden && !$('#item-form').elements.title.value.trim()) {
+    renderForm();
+    $('#form-title').textContent = 'Check & save';
+    const extras = target.photos.length - 1;
+    toast(`Identified “${target.title}”${id.confidence !== 'high' ? ' (best guess)' : ''}${extras > 0 ? ` — added ${extras} archive image${extras === 1 ? '' : 's'}` : ''}. Check the details, then save.`);
+  }
 }
 
 async function saveForm(ev) {
@@ -932,6 +1003,7 @@ function renderSettings() {
   }
 
   renderDiscogsPanel();
+  renderVisionPanel();
   renderLockPanel();
 
   const records = items.filter((i) => i.kind === 'record').length;
@@ -1176,6 +1248,42 @@ function bindLockScreen() {
     if (!confirm('Really reset? This cannot be undone on this device.')) return;
     await resetDevice();
   });
+}
+
+function renderVisionPanel() {
+  const panel = $('#vision-panel');
+  if (getVisionKey()) {
+    panel.innerHTML = `
+      <p class="sync-note">Connected. "Take a photo" now identifies the item from the cover and fills in everything automatically — metadata, tracklist, and the archive's front/back images for records. Each identification costs a fraction of a cent on your Claude account.</p>
+      <div class="form-actions">
+        <button id="vision-remove" class="btn btn-danger" type="button">Remove key</button>
+      </div>`;
+    $('#vision-remove').addEventListener('click', async () => {
+      setVisionKey('');
+      await resealIfLocked();
+      renderVisionPanel();
+    });
+  } else {
+    panel.innerHTML = `
+      <p class="aside-note">Photograph a cover and have it identified automatically — Claude reads the sleeve or jacket, then the open databases fill in the rest. Needs your own Claude API key from
+      <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a> (each photo costs a fraction of a cent).</p>
+      <label class="field">
+        <span class="field-label">Claude API key</span>
+        <input id="vision-key-input" type="password" autocomplete="off" placeholder="sk-ant-…">
+      </label>
+      <div class="form-actions">
+        <button id="vision-save" class="btn btn-accent" type="button">Save key</button>
+      </div>
+      <p class="sync-note">Stored only in this browser (encrypted when the app lock is on) and sent only to api.anthropic.com along with the photo.</p>`;
+    $('#vision-save').addEventListener('click', async () => {
+      const key = $('#vision-key-input').value.trim();
+      if (!key) { toast('Paste the API key first.'); return; }
+      setVisionKey(key);
+      await resealIfLocked();
+      renderVisionPanel();
+      toast('Photo identification is on.');
+    });
+  }
 }
 
 function renderLockPanel() {

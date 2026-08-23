@@ -6,6 +6,7 @@
 
 import { getSyncConfig, setSyncConfig, overrideSyncConfig, removeStoredSyncConfig } from './sync.js';
 import { getDiscogsToken, setDiscogsToken, overrideDiscogsToken, removeStoredDiscogsToken } from './value.js';
+import { getVisionKey, setVisionKey, overrideVisionKey, removeStoredVisionKey } from './identify.js';
 
 const LOCK_KEY = 'stacks-lock';
 const SESSION_KEY = 'stacks-unlock-key';
@@ -69,13 +70,14 @@ async function decrypt(key, box) {
 /* ---------------- secrets handling ---------------- */
 
 function collectSecrets() {
-  return JSON.stringify({ sync: getSyncConfig(), discogs: getDiscogsToken() });
+  return JSON.stringify({ sync: getSyncConfig(), discogs: getDiscogsToken(), vision: getVisionKey() });
 }
 
 function applySecrets(json) {
   const s = JSON.parse(json);
   overrideSyncConfig(s.sync || null);
   overrideDiscogsToken(s.discogs || '');
+  overrideVisionKey(s.vision || '');
 }
 
 // While the lock is on, plaintext tokens must not sit in localStorage.
@@ -84,6 +86,7 @@ async function sealSecrets(key, bundle) {
   writeBundle(bundle);
   removeStoredSyncConfig();
   removeStoredDiscogsToken();
+  removeStoredVisionKey();
 }
 
 // Call after tokens change (connect/disconnect) while the lock is on.
@@ -131,6 +134,7 @@ export async function disableLock(pass) {
   // Write the secrets back as plaintext storage and drop the lock.
   setSyncConfig(getSyncConfig());
   setDiscogsToken(getDiscogsToken());
+  setVisionKey(getVisionKey());
   localStorage.removeItem(LOCK_KEY);
   sessionStorage.removeItem(SESSION_KEY);
   sessionKey = null;
@@ -177,6 +181,7 @@ export async function resetDevice() {
   sessionStorage.removeItem(SESSION_KEY);
   removeStoredSyncConfig();
   removeStoredDiscogsToken();
+  removeStoredVisionKey();
   for (const k of ['stacks-sync-covers', 'stacks-sync-last', 'stacks-tombstones']) {
     localStorage.removeItem(k);
   }

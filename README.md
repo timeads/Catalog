@@ -12,7 +12,11 @@ own.
   looked up in MusicBrainz — including the **tracklist** with durations —
   with covers from the Cover Art Archive.
 - **Take a photo**: photograph the cover of your copy and it becomes a new
-  item's cover; fill in the details after.
+  item's cover. With a Claude API key in Settings, the photo is
+  **identified automatically** — Claude reads the sleeve or jacket, the
+  open databases confirm the match, and everything fills in: metadata,
+  the tracklist, and the archive's front/back sleeve images for records.
+  Each identification costs a fraction of a cent on your own key.
 - **Search online by name** for anything that predates barcodes, and tap the
   match to prefill.
 - **Type it in**: blank form, only a title required.
