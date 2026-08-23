@@ -3,6 +3,10 @@ import { lookupBarcode, searchBooks, searchRecords, fetchTracks, findArchivePhot
 import { startScanner } from './scanner.js';
 import { getSyncConfig, setSyncConfig, lastSyncedAt, recordTombstone, syncNow } from './sync.js';
 import { getDiscogsToken, setDiscogsToken, parseValue, fmtMoney, marketLinks, discogsStats } from './value.js';
+import {
+  isLockEnabled, unlock, enableLock, disableLock, changePassphrase,
+  tryRestoreSession, resealIfLocked, resetDevice,
+} from './lock.js';
 
 /* ---------------- state ---------------- */
 
@@ -886,9 +890,10 @@ function renderSettings() {
         <button id="sync-disconnect" class="btn btn-danger" type="button">Disconnect</button>
       </div>`;
     $('#sync-now').addEventListener('click', () => runSync('manual'));
-    $('#sync-disconnect').addEventListener('click', () => {
+    $('#sync-disconnect').addEventListener('click', async () => {
       if (!confirm('Stop syncing on this device? Your catalog stays here and in the repo.')) return;
       setSyncConfig(null);
+      await resealIfLocked();
       syncUiState = { status: 'off', text: '' };
       renderSettings();
       renderSyncIndicators();
@@ -919,6 +924,7 @@ function renderSettings() {
       if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) { toast('Repository should look like owner/name.'); return; }
       if (!token) { toast('Paste the access token.'); return; }
       setSyncConfig({ repo, token });
+      await resealIfLocked();
       renderSettings();
       renderSyncIndicators();
       await runSync('manual');
@@ -926,6 +932,7 @@ function renderSettings() {
   }
 
   renderDiscogsPanel();
+  renderLockPanel();
 
   const records = items.filter((i) => i.kind === 'record').length;
   $('#backup-stats').innerHTML = `
@@ -941,8 +948,9 @@ function renderDiscogsPanel() {
       <div class="form-actions">
         <button id="discogs-remove" class="btn btn-danger" type="button">Remove token</button>
       </div>`;
-    $('#discogs-remove').addEventListener('click', () => {
+    $('#discogs-remove').addEventListener('click', async () => {
       setDiscogsToken('');
+      await resealIfLocked();
       discogsCache.clear();
       renderDiscogsPanel();
     });
@@ -958,10 +966,11 @@ function renderDiscogsPanel() {
         <button id="discogs-save" class="btn btn-accent" type="button">Save token</button>
       </div>
       <p class="sync-note">Stored only in this browser and sent only to api.discogs.com.</p>`;
-    $('#discogs-save').addEventListener('click', () => {
+    $('#discogs-save').addEventListener('click', async () => {
       const token = $('#discogs-token-input').value.trim();
       if (!token) { toast('Paste the token first.'); return; }
       setDiscogsToken(token);
+      await resealIfLocked();
       discogsCache.clear();
       renderDiscogsPanel();
       toast('Discogs connected.');
@@ -1145,7 +1154,91 @@ function setViewMode(mode) {
   renderLibrary();
 }
 
-async function main() {
+/* ---------------- app lock ---------------- */
+
+function bindLockScreen() {
+  $('#lock-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const ok = await unlock($('#lock-pass').value);
+    if (!ok) {
+      $('#lock-error').hidden = false;
+      $('#lock-pass').select();
+      return;
+    }
+    $('#lock-pass').value = '';
+    $('#lock-error').hidden = true;
+    $('#lock-screen').hidden = true;
+    document.body.classList.remove('is-locked');
+    startApp();
+  });
+  $('#lock-reset').addEventListener('click', async () => {
+    if (!confirm('Reset this device? The local copy of the catalog and its tokens are wiped. Anything synced or backed up is safe and can be restored.')) return;
+    if (!confirm('Really reset? This cannot be undone on this device.')) return;
+    await resetDevice();
+  });
+}
+
+function renderLockPanel() {
+  const panel = $('#lock-panel');
+  if (isLockEnabled()) {
+    panel.innerHTML = `
+      <p class="sync-note">App lock is on. Opening the app on this device asks for the passphrase, and the sync and Discogs tokens are stored encrypted with it.</p>
+      <label class="field">
+        <span class="field-label">Current passphrase</span>
+        <input id="lock-current" type="password" autocomplete="current-password">
+      </label>
+      <label class="field">
+        <span class="field-label">New passphrase <em>for changing it</em></span>
+        <input id="lock-new" type="password" autocomplete="new-password">
+      </label>
+      <div class="form-actions">
+        <button id="lock-change" class="btn btn-quiet" type="button">Change passphrase</button>
+        <button id="lock-off" class="btn btn-danger" type="button">Turn off lock</button>
+      </div>`;
+    $('#lock-change').addEventListener('click', async () => {
+      const cur = $('#lock-current').value;
+      const next = $('#lock-new').value;
+      if (next.length < 4) { toast('New passphrase needs at least 4 characters.'); return; }
+      if (await changePassphrase(cur, next)) { renderLockPanel(); toast('Passphrase changed.'); }
+      else toast("Current passphrase doesn't match.");
+    });
+    $('#lock-off').addEventListener('click', async () => {
+      if (await disableLock($('#lock-current').value)) { renderLockPanel(); toast('App lock is off.'); }
+      else toast("Current passphrase doesn't match.");
+    });
+  } else {
+    panel.innerHTML = `
+      <p class="aside-note">Require a passphrase to open the app on this device. It also encrypts the stored sync and Discogs tokens. Each person sets their own passphrase on their own device — and if it's forgotten, the way back in is a device reset (the collection stays safe in the sync repo and backups).</p>
+      <label class="field">
+        <span class="field-label">Passphrase</span>
+        <input id="lock-pass-1" type="password" autocomplete="new-password">
+      </label>
+      <label class="field">
+        <span class="field-label">Repeat passphrase</span>
+        <input id="lock-pass-2" type="password" autocomplete="new-password">
+      </label>
+      <div class="form-actions">
+        <button id="lock-on" class="btn btn-accent" type="button">Turn on app lock</button>
+      </div>`;
+    $('#lock-on').addEventListener('click', async () => {
+      const a = $('#lock-pass-1').value;
+      const b = $('#lock-pass-2').value;
+      if (a.length < 4) { toast('Passphrase needs at least 4 characters.'); return; }
+      if (a !== b) { toast("The passphrases don't match."); return; }
+      await enableLock(a);
+      renderLockPanel();
+      toast('App lock is on.');
+    });
+  }
+}
+
+/* ---------------- boot ---------------- */
+
+let appStarted = false;
+
+async function startApp() {
+  if (appStarted) return;
+  appStarted = true;
   items = await getAllItems();
   // Upgrade items saved before the photo gallery existed.
   for (const item of items) {
@@ -1159,6 +1252,17 @@ async function main() {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
   if (getSyncConfig() && navigator.onLine !== false) runSync('startup');
+}
+
+async function main() {
+  bindLockScreen();
+  if (isLockEnabled() && !(await tryRestoreSession())) {
+    document.body.classList.add('is-locked');
+    $('#lock-screen').hidden = false;
+    $('#lock-pass').focus();
+    return; // startApp() runs after a successful unlock
+  }
+  await startApp();
 }
 
 main();

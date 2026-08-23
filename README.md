@@ -33,9 +33,20 @@ own.
   (values also export in the CSV — handy for insurance).
 - **Sync between devices** (optional): phone and desktop stay matching
   through a private GitHub repository — see below.
+- **App lock** (optional): a per-device passphrase gates the app and
+  encrypts the stored sync/Discogs tokens (WebCrypto, PBKDF2 + AES-GCM).
+  Unlock lasts for the browser session; a forgotten passphrase means
+  resetting the device copy (the collection stays in the sync repo and
+  backups). Each user sets their own passphrase on their own device.
 - **Backup & export**: one-tap JSON backup (covers included) and CSV export.
 - **Works offline**: app shell cached by a service worker, catalog in
   IndexedDB. Only lookups and sync need a connection.
+
+**On repo visibility:** this code repo can stay public — it contains no
+secrets or data, and GitHub Pages on free accounts requires a public repo.
+The privacy boundary is the *data* repo used for sync: keep that one
+private. The app URL itself serves an empty app to strangers; each
+visitor's browser has its own storage.
 
 No accounts, no server, no build step — plain HTML/CSS/JS. The only vendored
 dependency is [ZXing](https://github.com/zxing-js/library) for barcode

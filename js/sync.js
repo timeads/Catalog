@@ -20,12 +20,28 @@ function writeJson(key, value) {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
 }
 
+// With the app lock on, the config lives encrypted in the lock bundle and
+// is provided at runtime instead of read from storage.
+let cfgOverride;
+
+export function overrideSyncConfig(cfg) {
+  cfgOverride = cfg;
+}
+
+export function removeStoredSyncConfig() {
+  localStorage.removeItem(CFG_KEY);
+}
+
 export function getSyncConfig() {
+  if (cfgOverride !== undefined) {
+    return cfgOverride && cfgOverride.token && cfgOverride.repo ? cfgOverride : null;
+  }
   const cfg = readJson(CFG_KEY, null);
   return cfg && cfg.token && cfg.repo ? cfg : null;
 }
 
 export function setSyncConfig(cfg) {
+  if (cfgOverride !== undefined) cfgOverride = cfg || null;
   if (cfg) {
     writeJson(CFG_KEY, cfg);
   } else {

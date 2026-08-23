@@ -4,11 +4,25 @@
 
 const TOKEN_KEY = 'stacks-discogs-token';
 
+// With the app lock on, the token lives encrypted in the lock bundle and
+// is provided at runtime instead of read from storage.
+let tokenOverride;
+
+export function overrideDiscogsToken(token) {
+  tokenOverride = token;
+}
+
+export function removeStoredDiscogsToken() {
+  try { localStorage.removeItem(TOKEN_KEY); } catch {}
+}
+
 export function getDiscogsToken() {
+  if (tokenOverride !== undefined) return tokenOverride || '';
   try { return localStorage.getItem(TOKEN_KEY) || ''; } catch { return ''; }
 }
 
 export function setDiscogsToken(token) {
+  if (tokenOverride !== undefined) tokenOverride = token || '';
   try {
     if (token) localStorage.setItem(TOKEN_KEY, token);
     else localStorage.removeItem(TOKEN_KEY);

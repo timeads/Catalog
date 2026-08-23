@@ -1379,6 +1379,45 @@ input:focus, textarea:focus, select:focus {
 
 .sheet-option small { display: block; font-size: 12.5px; color: var(--ink-3); }
 
+/* ---------- app lock ---------- */
+
+.lock-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: var(--bg);
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.lock-card {
+  width: min(320px, 100%);
+  display: grid;
+  gap: 12px;
+  justify-items: center;
+  text-align: center;
+}
+
+.lock-mark { width: 56px; height: 72px; color: var(--ink); }
+
+.lock-card h1 {
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+
+.lock-sub { color: var(--ink-2); margin: 0 0 6px; font-size: 14px; }
+
+.lock-card form { display: grid; gap: 10px; width: 100%; }
+
+.lock-error { color: var(--danger); font-size: 13px; margin: 0; }
+
+body.is-locked .shell,
+body.is-locked .tabbar,
+body.is-locked .toast { display: none !important; }
+
 /* ---------- toast ---------- */
 
 .toast {
