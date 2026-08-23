@@ -160,6 +160,44 @@ export async function searchRecords(query) {
   return out;
 }
 
+/* ---------------- archive photo finder ---------------- */
+
+// Every image the open archives hold for this item:
+//   Records: Cover Art Archive — front, back, labels, booklets…
+//   Books:   Open Library — the edition's cover set.
+// Returns [{url, thumb, label}].
+export async function findArchivePhotos(item) {
+  if (item.kind === 'record') {
+    let mbid = item.mbid;
+    if (!mbid && item.barcode) {
+      const release = await musicBrainzByBarcode(item.barcode.replace(/[^0-9]/g, ''));
+      mbid = release && release.mbid;
+    }
+    if (!mbid) return [];
+    const data = await getJson(`https://coverartarchive.org/release/${mbid}`);
+    if (!data || !data.images) return [];
+    return data.images.map((img) => {
+      const t = img.thumbnails || {};
+      const full = (t['500'] || t.large || img.image || '').replace('http://', 'https://');
+      return {
+        url: full,
+        thumb: (t['250'] || t.small || full).replace('http://', 'https://'),
+        label: (img.types || []).join(' · ') || (img.comment || 'Image'),
+      };
+    }).filter((p) => p.url);
+  }
+
+  const isbn = (item.barcode || '').replace(/[^0-9Xx]/g, '');
+  if (!isbn) return [];
+  const data = await getJson(`https://openlibrary.org/isbn/${isbn}.json`);
+  const ids = ((data && data.covers) || []).filter((id) => id > 0);
+  return ids.map((id, i) => ({
+    url: `https://covers.openlibrary.org/b/id/${id}-L.jpg`,
+    thumb: `https://covers.openlibrary.org/b/id/${id}-M.jpg`,
+    label: i === 0 ? 'Cover' : `Cover ${i + 1}`,
+  }));
+}
+
 /* ---------------- barcode entry point ---------------- */
 
 export async function lookupBarcode(rawCode) {

@@ -1,5 +1,5 @@
-import { getAllItems, putItem, deleteItem, newItem } from './db.js';
-import { lookupBarcode, searchBooks, searchRecords, fetchTracks } from './lookup.js';
+import { getAllItems, putItem, deleteItem, newItem, newPhoto, migrateItem } from './db.js';
+import { lookupBarcode, searchBooks, searchRecords, fetchTracks, findArchivePhotos } from './lookup.js';
 import { startScanner } from './scanner.js';
 import { getSyncConfig, setSyncConfig, lastSyncedAt, recordTombstone, syncNow } from './sync.js';
 
@@ -14,7 +14,8 @@ let searchKind = 'record'; // online-search toggle
 let draft = null; // item being created/edited in the form
 let stopScan = null; // active scanner's stop()
 let currentView = 'home';
-const coverUrls = new Map(); // item id -> object URL for its cover blob
+let detailSelectedPhoto = null; // photo id highlighted on the detail page
+const photoUrls = new Map(); // photo id (or item id, legacy) -> object URL
 
 let viewMode = 'grid'; // library layout: 'grid' | 'list'
 try { viewMode = localStorage.getItem('stacks-view') === 'list' ? 'list' : 'grid'; } catch {}
@@ -50,12 +51,32 @@ function placeholderTone(item) {
   return PLACEHOLDER_TONES[h % PLACEHOLDER_TONES.length];
 }
 
+function photoSrc(photo) {
+  if (photo.blob) {
+    if (!photoUrls.has(photo.id)) photoUrls.set(photo.id, URL.createObjectURL(photo.blob));
+    return photoUrls.get(photo.id);
+  }
+  return photo.url || '';
+}
+
 function coverSrc(item) {
+  const p = (item.photos || [])[0];
+  if (p) return photoSrc(p);
+  // Legacy items not yet migrated
   if (item.coverBlob) {
-    if (!coverUrls.has(item.id)) coverUrls.set(item.id, URL.createObjectURL(item.coverBlob));
-    return coverUrls.get(item.id);
+    if (!photoUrls.has(item.id)) photoUrls.set(item.id, URL.createObjectURL(item.coverBlob));
+    return photoUrls.get(item.id);
   }
   return item.coverUrl || '';
+}
+
+function dropItemUrls(item) {
+  for (const p of item.photos || []) {
+    const u = photoUrls.get(p.id);
+    if (u) { URL.revokeObjectURL(u); photoUrls.delete(p.id); }
+  }
+  const u = photoUrls.get(item.id);
+  if (u) { URL.revokeObjectURL(u); photoUrls.delete(item.id); }
 }
 
 function coverHtml(item, cls = 'cover') {
@@ -126,6 +147,7 @@ function route() {
   if (view === 'detail') {
     const item = items.find((i) => i.id === arg);
     if (!item) { location.hash = '#/'; return; }
+    if (route.lastDetailId !== arg) { detailSelectedPhoto = null; route.lastDetailId = arg; }
     renderDetail(item);
   }
   if (view === 'home') renderHome();
@@ -326,6 +348,10 @@ async function onBarcode(code) {
 
 function openDraftFrom(found) {
   draft = Object.assign(newItem(found.kind), found);
+  if (!(draft.photos || []).length && found.coverUrl) {
+    draft.photos = [newPhoto({ url: found.coverUrl, label: 'Front' })];
+  }
+  migrateItem(draft);
   // A record picked from name-search doesn't have its tracklist yet.
   if (found.kind === 'record' && found.mbid && !(found.tracks || []).length) {
     const target = draft;
@@ -394,7 +420,7 @@ function renderForm() {
 
 function renderFormCover() {
   $('#form-cover').innerHTML = coverHtml(draft);
-  $('#cover-clear').hidden = !draft.coverBlob && !draft.coverUrl;
+  $('#cover-clear').hidden = !(draft.photos || []).length;
 }
 
 // Downscale a photo to a small JPEG blob so sync and backups stay light.
@@ -421,9 +447,10 @@ async function onCoverPicked(ev) {
   const file = ev.target.files && ev.target.files[0];
   ev.target.value = '';
   if (!file) return;
-  draft.coverBlob = await fileToCover(file);
-  draft.coverUrl = '';
-  coverUrls.delete(draft.id);
+  // The photo of your copy becomes the cover; a looked-up image stays in
+  // the gallery behind it.
+  draft.photos.unshift(newPhoto({ blob: await fileToCover(file) }));
+  migrateItem(draft);
   renderFormCover();
 }
 
@@ -435,7 +462,8 @@ async function onPhotoPicked(ev) {
   if (!file) return;
   closeSheet();
   draft = newItem('record');
-  draft.coverBlob = await fileToCover(file);
+  draft.photos = [newPhoto({ blob: await fileToCover(file) })];
+  migrateItem(draft);
   toast('Cover captured — now fill in the details.');
   location.hash = '#/new';
   if (views.form && !views.form.hidden) renderFormCover();
@@ -456,37 +484,43 @@ async function saveForm(ev) {
   draft.title = title;
   draft.tags = form.elements.tags.value.split(',').map((t) => t.trim()).filter(Boolean);
   draft.updatedAt = new Date().toISOString();
+  migrateItem(draft);
   await putItem(draft);
   const idx = items.findIndex((i) => i.id === draft.id);
   if (idx >= 0) items[idx] = draft; else items.push(draft);
-  coverUrls.delete(draft.id);
   const saved = draft;
   draft = null;
   updateNavCount();
   toast(`“${saved.title}” is on the shelf.`);
   location.hash = `#/item/${saved.id}`;
-  cacheRemoteCover(saved);
+  cachePhotoBlobs(saved);
   scheduleSync();
 }
 
-// Pull a looked-up cover into the catalog itself, so the image survives
-// offline, syncs, and travels with backups. Best effort — some cover hosts
-// don't allow cross-origin reads, and the URL keeps working regardless.
-async function cacheRemoteCover(item) {
-  if (item.coverBlob || !item.coverUrl) return;
-  try {
-    const res = await fetch(item.coverUrl);
-    if (!res.ok) return;
-    const blob = await res.blob();
-    if (!blob.type.startsWith('image/') || !blob.size) return;
-    const current = items.find((i) => i.id === item.id);
-    if (!current || current.coverBlob || current.coverUrl !== item.coverUrl) return;
-    current.coverBlob = blob;
-    coverUrls.delete(current.id);
-    await putItem(current);
+// Pull remote photo images into the catalog itself, so they survive
+// offline, sync as files, and travel with backups. Best effort — some
+// cover hosts don't allow cross-origin reads, and the URL keeps working.
+async function cachePhotoBlobs(item) {
+  let changed = false;
+  for (const photo of item.photos || []) {
+    if (photo.blob || !photo.url) continue;
+    try {
+      const res = await fetch(photo.url);
+      if (!res.ok) continue;
+      const blob = await res.blob();
+      if (!blob.type.startsWith('image/') || !blob.size) continue;
+      photo.blob = blob;
+      photoUrls.delete(photo.id);
+      changed = true;
+    } catch {
+      // keep the remote URL only
+    }
+  }
+  if (changed && items.some((i) => i.id === item.id)) {
+    migrateItem(item);
+    await putItem(item);
+    if (currentView === 'detail') rerender();
     scheduleSync();
-  } catch {
-    // keep the remote URL only
   }
 }
 
@@ -497,6 +531,24 @@ function fmtMs(ms) {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
+// Persist an in-place change to an item made from the detail page.
+async function saveItemMutation(item) {
+  item.updatedAt = new Date().toISOString();
+  migrateItem(item);
+  await putItem(item);
+  const idx = items.findIndex((i) => i.id === item.id);
+  if (idx >= 0) items[idx] = item;
+  renderDetail(item);
+  scheduleSync();
+}
+
+function photoImgHtml(photo, item) {
+  const src = photoSrc(photo);
+  if (!src) return placeholderHtml(item);
+  return `<img src="${esc(src)}" alt="" loading="lazy"
+    onerror="this.hidden=true;this.nextElementSibling.hidden=false">${placeholderHtml(item, true)}`;
+}
+
 function renderDetail(item) {
   const meta = [item.year, item.genre, item.format, item.condition].filter(Boolean);
   const rows = [
@@ -505,6 +557,10 @@ function renderDetail(item) {
     ['Added', new Date(item.createdAt).toLocaleDateString()],
     ['Notes', item.notes],
   ].filter(([, v]) => v);
+
+  const photos = item.photos || [];
+  const shown = photos.find((p) => p.id === detailSelectedPhoto) || photos[0] || null;
+  const canFindArchive = !!(item.barcode || item.mbid);
 
   const tracks = item.tracks || [];
   const totalMs = tracks.reduce((sum, t) => sum + (t.ms || 0), 0);
@@ -521,9 +577,34 @@ function renderDetail(item) {
       </li>`).join('')}
     </ol>` : '';
 
+  const photoSection = `
+    <div class="detail-section-head">
+      <h2>Photos</h2>
+      ${canFindArchive ? '<button id="find-archive" class="section-link linkish" type="button">Find in the archives</button>' : ''}
+    </div>
+    <div class="photo-strip">
+      ${photos.map((p, i) => `
+        <button class="photo-thumb${p === shown ? ' is-selected' : ''}" type="button" data-photo="${p.id}">
+          ${photoImgHtml(p, item)}
+          ${i === 0 ? '<span class="thumb-flag">Cover</span>' : ''}
+          ${p.label && i !== 0 ? `<span class="thumb-flag quiet">${esc(p.label)}</span>` : ''}
+        </button>`).join('')}
+      <label class="photo-add" for="detail-photo-file" title="Add photos">＋</label>
+    </div>
+    ${shown && photos.length > 1 ? `
+      <div class="photo-actions">
+        ${photos[0] !== shown ? '<button id="photo-default" class="btn btn-quiet" type="button">Make this the cover</button>' : ''}
+        <button id="photo-remove" class="btn btn-danger" type="button">Remove photo</button>
+      </div>` : shown ? `
+      <div class="photo-actions">
+        <button id="photo-remove" class="btn btn-danger" type="button">Remove photo</button>
+      </div>` : ''}
+    <p id="archive-status" class="scan-status" hidden></p>
+    <div id="archive-results" class="archive-grid" hidden></div>`;
+
   $('#detail-card').innerHTML = `
     <div class="detail-top">
-      <div class="detail-cover">${coverHtml(item)}</div>
+      <div class="detail-cover">${shown ? photoImgHtml(shown, item) : placeholderHtml(item)}</div>
       <div>
         <span class="kind-badge">${item.kind}</span>
         <h1>${esc(item.title)}</h1>
@@ -536,23 +617,112 @@ function renderDetail(item) {
         </div>
       </div>
     </div>
+    ${photoSection}
     ${tracklist}
     <dl class="detail-fields">
       ${rows.map(([k, v, cls]) => `<div><dt>${esc(k)}</dt><dd${cls ? ` class="${cls}"` : ''}>${esc(v)}</dd></div>`).join('')}
       ${item.tags.length ? `<div><dt>Shelves</dt><dd class="tag-list">
         ${item.tags.map((t) => `<span class="meta-chip">${esc(t)}</span>`).join('')}</dd></div>` : ''}
     </dl>`;
+
+  bindDetailPhotoEvents(item, shown);
+
   $('#detail-delete').onclick = async () => {
     if (!confirm(`Remove “${item.title}” from the catalog?`)) return;
     await deleteItem(item.id);
     recordTombstone(item.id);
     items = items.filter((i) => i.id !== item.id);
-    coverUrls.delete(item.id);
+    dropItemUrls(item);
     updateNavCount();
     toast('Removed.');
     location.hash = '#/library';
     scheduleSync();
   };
+}
+
+function bindDetailPhotoEvents(item, shown) {
+  $$('#detail-card .photo-thumb').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      detailSelectedPhoto = btn.dataset.photo;
+      renderDetail(item);
+    });
+  });
+
+  const makeDefault = $('#photo-default');
+  if (makeDefault) {
+    makeDefault.addEventListener('click', async () => {
+      item.photos = [shown, ...item.photos.filter((p) => p !== shown)];
+      await saveItemMutation(item);
+      toast('Cover updated.');
+    });
+  }
+
+  const remove = $('#photo-remove');
+  if (remove) {
+    remove.addEventListener('click', async () => {
+      if (!confirm('Remove this photo?')) return;
+      item.photos = item.photos.filter((p) => p !== shown);
+      const u = photoUrls.get(shown.id);
+      if (u) { URL.revokeObjectURL(u); photoUrls.delete(shown.id); }
+      detailSelectedPhoto = null;
+      await saveItemMutation(item);
+    });
+  }
+
+  const find = $('#find-archive');
+  if (find) find.addEventListener('click', () => runArchiveSearch(item));
+}
+
+async function runArchiveSearch(item) {
+  const status = $('#archive-status');
+  const grid = $('#archive-results');
+  status.hidden = false;
+  grid.hidden = false;
+  status.textContent = 'Searching the archives…';
+  grid.innerHTML = '';
+  let found = [];
+  try { found = await findArchivePhotos(item); } catch { found = []; }
+  const have = new Set((item.photos || []).map((p) => p.url).filter(Boolean));
+  const fresh = found.filter((f) => !have.has(f.url));
+  if (!fresh.length) {
+    status.textContent = found.length
+      ? 'Every archive image is already in the gallery.'
+      : 'No extra images in the archives for this one.';
+    return;
+  }
+  status.textContent = `${fresh.length} image${fresh.length === 1 ? '' : 's'} found — tap to add.`;
+  grid.innerHTML = fresh.map((f, i) => `
+    <button class="archive-pick" type="button" data-idx="${i}">
+      <img src="${esc(f.thumb)}" alt="" loading="lazy">
+      <span>${esc(f.label)}</span>
+    </button>`).join('');
+  $$('#archive-results .archive-pick').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const f = fresh[Number(btn.dataset.idx)];
+      item.photos.push(newPhoto({ url: f.url, label: f.label }));
+      detailSelectedPhoto = null;
+      await saveItemMutation(item);
+      toast(`Added “${f.label}”.`);
+      cachePhotoBlobs(item);
+      runArchiveSearch(item); // keep the remaining archive images on screen
+    });
+  });
+}
+
+// The + tile in the photo strip: add any number of photos at once.
+async function onDetailPhotosPicked(ev) {
+  const files = [...(ev.target.files || [])];
+  ev.target.value = '';
+  if (!files.length) return;
+  const id = (location.hash.match(/^#\/item\/(.*)$/) || [])[1];
+  const item = items.find((i) => i.id === id);
+  if (!item) return;
+  for (const file of files) {
+    item.photos.push(newPhoto({ blob: await fileToCover(file) }));
+  }
+  detailSelectedPhoto = null;
+  await saveItemMutation(item);
+  toast(`Added ${files.length} photo${files.length === 1 ? '' : 's'}.`);
 }
 
 /* ---------------- sync ---------------- */
@@ -602,7 +772,8 @@ async function runSync(reason) {
     syncUiState = { status: 'idle', text: '' };
     if (result && result.applied) {
       items = await getAllItems();
-      coverUrls.clear();
+      for (const u of photoUrls.values()) URL.revokeObjectURL(u);
+      photoUrls.clear();
       rerender();
     }
     renderSyncIndicators();
@@ -704,9 +875,19 @@ async function exportJson() {
   const out = [];
   for (const it of items) {
     const { coverBlob, ...rest } = it;
-    out.push({ ...rest, coverData: coverBlob ? await blobToDataUrl(coverBlob) : null });
+    const photos = [];
+    for (const p of it.photos || []) {
+      const { blob, ...pr } = p;
+      photos.push({ ...pr, data: blob ? await blobToDataUrl(blob) : null });
+    }
+    out.push({
+      ...rest,
+      photos,
+      // legacy field so backups still open in older builds
+      coverData: coverBlob ? await blobToDataUrl(coverBlob) : null,
+    });
   }
-  const payload = { app: 'stacks', version: 1, exportedAt: new Date().toISOString(), items: out };
+  const payload = { app: 'stacks', version: 2, exportedAt: new Date().toISOString(), items: out };
   const stamp = new Date().toISOString().slice(0, 10);
   download(`stacks-backup-${stamp}.json`, new Blob([JSON.stringify(payload)], { type: 'application/json' }));
   toast(`Backed up ${out.length} items.`);
@@ -738,12 +919,21 @@ async function importJson(ev) {
       const item = Object.assign(newItem(rest.kind === 'book' ? 'book' : 'record'), rest);
       item.tags = Array.isArray(item.tags) ? item.tags.map(String) : [];
       item.tracks = Array.isArray(item.tracks) ? item.tracks : [];
-      if (coverData && coverData.startsWith('data:')) {
+      if (Array.isArray(rest.photos)) {
+        item.photos = [];
+        for (const p of rest.photos) {
+          const { data, ...pr } = p;
+          const photo = newPhoto(pr);
+          if (data && data.startsWith('data:')) photo.blob = await (await fetch(data)).blob();
+          item.photos.push(photo);
+        }
+      } else if (coverData && coverData.startsWith('data:')) {
         item.coverBlob = await (await fetch(coverData)).blob();
       }
+      migrateItem(item);
       const existing = items.findIndex((i) => i.id === item.id);
       if (existing >= 0) { items[existing] = item; updated++; } else { items.push(item); added++; }
-      coverUrls.delete(item.id);
+      dropItemUrls(item);
       await putItem(item);
     }
     updateNavCount();
@@ -815,11 +1005,12 @@ function bindEvents() {
   $('#cover-file').addEventListener('change', onCoverPicked);
   $('#photo-file').addEventListener('change', onPhotoPicked);
   $('#cover-clear').addEventListener('click', () => {
-    draft.coverBlob = null;
-    draft.coverUrl = '';
-    coverUrls.delete(draft.id);
+    const removed = draft.photos.shift();
+    if (removed) photoUrls.delete(removed.id);
+    migrateItem(draft);
     renderFormCover();
   });
+  $('#detail-photo-file').addEventListener('change', onDetailPhotosPicked);
   $('#detail-back').addEventListener('click', () => {
     if (history.length > 1) history.back(); else location.hash = '#/library';
   });
@@ -839,6 +1030,10 @@ function setViewMode(mode) {
 
 async function main() {
   items = await getAllItems();
+  // Upgrade items saved before the photo gallery existed.
+  for (const item of items) {
+    if (migrateItem(item)) await putItem(item);
+  }
   bindEvents();
   updateNavCount();
   renderSyncIndicators();

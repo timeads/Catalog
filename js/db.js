@@ -65,11 +65,47 @@ export function newItem(kind) {
     notes: '',
     tracks: [], // records: [{no, title, ms}] from MusicBrainz
     mbid: '', // MusicBrainz release id, when known
+    // photos[0] is the default/cover. Each: {id, blob, url, file, label}
+    // where blob is device-local, url is a remote image, file is the
+    // sync-repo path once uploaded, label e.g. 'Back'.
+    photos: [],
+    // Legacy mirrors of photos[0], kept so older clients and old sync
+    // data keep showing a cover.
     coverUrl: '',
     coverBlob: null,
     createdAt: now,
     updatedAt: now,
   };
+}
+
+export function newPhoto(fields = {}) {
+  return { id: crypto.randomUUID(), blob: null, url: '', file: '', label: '', ...fields };
+}
+
+// Upgrade items saved before the photo gallery existed (single
+// coverBlob/coverUrl, optionally a covers/<id>.jpg file in the sync repo).
+// Returns true when the item was changed.
+export function migrateItem(item) {
+  let changed = false;
+  if (!Array.isArray(item.photos)) { item.photos = []; changed = true; }
+  if (!item.photos.length && (item.coverBlob || item.coverUrl || item.hasCoverFile)) {
+    item.photos.push(newPhoto({
+      blob: item.coverBlob || null,
+      url: item.coverUrl || '',
+      file: item.hasCoverFile ? `covers/${item.id}.jpg` : '',
+    }));
+    changed = true;
+  }
+  // Keep the legacy mirror fields following the default photo.
+  const p = item.photos[0] || null;
+  const mirrorBlob = (p && p.blob) || null;
+  const mirrorUrl = (p && p.url) || '';
+  if (item.coverBlob !== mirrorBlob || item.coverUrl !== mirrorUrl) {
+    item.coverBlob = mirrorBlob;
+    item.coverUrl = mirrorUrl;
+    changed = true;
+  }
+  return changed;
 }
 
 // Ask the browser to protect IndexedDB from storage-pressure eviction.

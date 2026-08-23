@@ -16,6 +16,11 @@ own.
 - **Search online by name** for anything that predates barcodes, and tap the
   match to prefill.
 - **Type it in**: blank form, only a title required.
+- **Photo galleries**: every item holds any number of photos — add several
+  at once from the camera or files, remove any, and pick which one is the
+  cover. **Find in the archives** pulls every image the open databases hold
+  for the item: for records that's the Cover Art Archive set (front, back,
+  labels, booklets), for books the Open Library edition covers.
 - **Search & organize**: instant accent-insensitive full-text search across
   every field, kind filters, free-form shelves/tags, grid or list layouts,
   and sorting.

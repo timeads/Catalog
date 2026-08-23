@@ -1007,6 +1007,137 @@ input:focus, textarea:focus, select:focus {
 
 .detail-section-head h2 { font-size: 16px; font-weight: 700; margin: 0; }
 
+.linkish {
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.linkish:hover { text-decoration: underline; }
+
+/* photo gallery strip */
+.photo-strip {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding: 2px 2px 8px;
+  scrollbar-width: thin;
+}
+
+.photo-thumb {
+  position: relative;
+  width: 72px;
+  height: 72px;
+  flex-shrink: 0;
+  border: none;
+  border-radius: var(--r);
+  overflow: hidden;
+  background: var(--surface-3);
+  cursor: pointer;
+  padding: 0;
+  box-shadow: inset 0 0 0 1px rgba(28, 25, 23, 0.08);
+}
+
+.photo-thumb img,
+.photo-thumb .cover-placeholder {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  font-size: 1.4rem;
+}
+
+.photo-thumb.is-selected {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.thumb-flag {
+  position: absolute;
+  left: 4px;
+  bottom: 4px;
+  z-index: 1;
+  background: var(--accent);
+  color: var(--on-accent);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  max-width: calc(100% - 8px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thumb-flag.quiet {
+  background: color-mix(in srgb, var(--bg) 85%, transparent);
+  color: var(--ink);
+}
+
+.photo-add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 72px;
+  height: 72px;
+  flex-shrink: 0;
+  border: 1.5px dashed var(--border-strong);
+  border-radius: var(--r);
+  color: var(--ink-3);
+  font-size: 24px;
+  cursor: pointer;
+}
+
+.photo-add:hover { border-color: var(--accent); color: var(--accent); }
+
+.photo-actions { display: flex; gap: 8px; margin: 2px 0 6px; }
+
+.photo-actions .btn { padding: 8px 14px; font-size: 13px; }
+
+/* archive image picker */
+.archive-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(108px, 1fr));
+  gap: 10px;
+  margin: 10px 0 6px;
+  max-width: 560px;
+}
+
+.archive-pick {
+  display: grid;
+  gap: 5px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: var(--r);
+  padding: 6px;
+  cursor: pointer;
+  text-align: center;
+}
+
+.archive-pick:hover { border-color: var(--accent); }
+
+.archive-pick img {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  border-radius: var(--r-sm);
+  background: var(--surface-3);
+}
+
+.archive-pick span {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .detail-section-head .total-time {
   font-size: 12.5px;
   font-variant-numeric: tabular-nums;

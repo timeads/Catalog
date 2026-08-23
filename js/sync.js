@@ -3,7 +3,7 @@
 // Merge is per-item last-write-wins on updatedAt; deletions carry tombstones
 // so they propagate instead of resurrecting. Tokens stay in this browser.
 
-import { getAllItems, putItem, deleteItem } from './db.js';
+import { getAllItems, putItem, deleteItem, migrateItem } from './db.js';
 
 const CFG_KEY = 'stacks-sync-config';
 const COVERS_KEY = 'stacks-sync-covers'; // {itemId: {sha, ts}} pushed from this device
@@ -108,8 +108,8 @@ async function fetchRemoteSha(cfg, path) {
   return (await res.json()).sha || null;
 }
 
-async function readCoverBlob(cfg, id) {
-  const res = await fetch(fileUrl(cfg, `covers/${id}.jpg`), {
+async function readFileBlob(cfg, path) {
+  const res = await fetch(fileUrl(cfg, path), {
     headers: headers(cfg, { Accept: 'application/vnd.github.raw+json' }),
   });
   if (!res.ok) return null;
@@ -121,7 +121,22 @@ async function readCoverBlob(cfg, id) {
 
 function serialize(item) {
   const { coverBlob, ...rest } = item;
-  return { ...rest, hasCoverFile: !!coverBlob || !!item.hasCoverFile };
+  return {
+    ...rest,
+    photos: (item.photos || []).map(({ blob, ...p }) => p),
+    hasCoverFile: !!coverBlob || !!item.hasCoverFile,
+  };
+}
+
+// The winner of a merge may be the remote copy, which carries no image
+// bytes — graft the blobs this device already has back in by photo id.
+function graftPhotoBlobs(winner, local) {
+  const localBlobs = new Map(((local && local.photos) || []).map((p) => [p.id, p.blob]));
+  winner.photos = (winner.photos || []).map((p) => ({
+    ...p,
+    blob: p.blob || localBlobs.get(p.id) || null,
+  }));
+  return winner;
 }
 
 function newerOf(a, b) {
@@ -171,16 +186,28 @@ export async function syncNow(onProgress = () => {}) {
         merged.set(id, winner);
       }
 
-      // Apply remote wins locally (keep local cover blob when we have one).
+      // Apply remote wins locally (grafting this device's image bytes back
+      // in), migrate old-shape items, and give every local-only photo its
+      // repo path before the catalog is serialized.
       let applied = 0;
       for (const [id, winner] of merged) {
         const l = localMap.get(id);
-        if (!l || winner !== l) {
-          const stored = { ...winner, coverBlob: (l && l.coverBlob) || null };
+        let stored = winner;
+        let dirty = winner !== l;
+        if (dirty) {
+          stored = graftPhotoBlobs({ ...winner }, l);
           delete stored.coverData;
-          await putItem(stored);
-          applied++;
         }
+        if (migrateItem(stored)) dirty = true;
+        for (const p of stored.photos) {
+          if (p.blob && !p.file) { p.file = `covers/${id}/${p.id}.jpg`; dirty = true; }
+        }
+        if (dirty) {
+          await putItem(stored);
+          merged.set(id, stored);
+          if (winner !== l) applied++;
+        }
+        localMap.set(id, stored);
       }
       for (const item of localItems) {
         if (!merged.has(item.id)) { await deleteItem(item.id); applied++; }
@@ -205,7 +232,7 @@ export async function syncNow(onProgress = () => {}) {
         pushed = true;
       }
 
-      await syncCovers(cfg, merged, localMap, onProgress);
+      applied += await syncCovers(cfg, merged, localMap, onProgress);
 
       writeJson(TOMB_KEY, tombs);
       localStorage.setItem(LAST_KEY, new Date().toISOString());
@@ -219,30 +246,37 @@ export async function syncNow(onProgress = () => {}) {
 }
 
 async function syncCovers(cfg, merged, localMap, onProgress) {
-  const pushedCovers = readJson(COVERS_KEY, {});
+  const pushed = readJson(COVERS_KEY, {});
+  let pulls = 0;
   for (const [id, item] of merged) {
-    const local = localMap.get(id);
-    const blob = local && local.coverBlob;
-    if (blob) {
-      const mark = pushedCovers[id];
-      if (mark && mark.ts >= (item.updatedAt || '')) continue;
-      onProgress('Uploading covers…');
-      let sha = (mark && mark.sha) || null;
-      let result = await writeFile(cfg, `covers/${id}.jpg`, await blobToB64(blob), sha, `Cover for ${item.title || id}`);
-      if (result === null) {
-        sha = await fetchRemoteSha(cfg, `covers/${id}.jpg`);
-        result = await writeFile(cfg, `covers/${id}.jpg`, await blobToB64(blob), sha, `Cover for ${item.title || id}`);
-      }
-      if (result) pushedCovers[id] = { sha: result.sha, ts: item.updatedAt || new Date().toISOString() };
-    } else if (item.hasCoverFile) {
-      onProgress('Downloading covers…');
-      const remoteBlob = await readCoverBlob(cfg, id);
-      if (remoteBlob) {
-        const current = { ...item, coverBlob: remoteBlob };
-        delete current.coverData;
-        await putItem(current);
+    const local = localMap.get(id) || item;
+    let pullDirty = false;
+    for (const photo of local.photos || []) {
+      if (!photo.file) continue;
+      if (photo.blob) {
+        const key = `${id}/${photo.id}`;
+        const mark = pushed[key];
+        if (mark && mark.ts >= (local.updatedAt || '')) continue;
+        onProgress('Uploading photos…');
+        let sha = (mark && mark.sha) || null;
+        let result = await writeFile(cfg, photo.file, await blobToB64(photo.blob), sha, `Photo for ${local.title || id}`);
+        if (result === null) {
+          sha = await fetchRemoteSha(cfg, photo.file);
+          result = await writeFile(cfg, photo.file, await blobToB64(photo.blob), sha, `Photo for ${local.title || id}`);
+        }
+        if (result) pushed[key] = { sha: result.sha, ts: local.updatedAt || new Date().toISOString() };
+      } else {
+        onProgress('Downloading photos…');
+        const blob = await readFileBlob(cfg, photo.file);
+        if (blob) { photo.blob = blob; pullDirty = true; }
       }
     }
+    if (pullDirty) {
+      migrateItem(local); // refresh the legacy cover mirror
+      await putItem(local);
+      pulls++;
+    }
   }
-  writeJson(COVERS_KEY, pushedCovers);
+  writeJson(COVERS_KEY, pushed);
+  return pulls;
 }
