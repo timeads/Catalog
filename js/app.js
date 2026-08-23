@@ -22,10 +22,16 @@ const FORMAT_OPTIONS = {
   book: ['Hardcover', 'Paperback', 'Trade paperback', 'Mass market', 'Oversize', 'Boxed set', 'Zine', 'Signed'],
 };
 
-const SPINES = {
-  record: ['#c2701e', '#a8552a', '#8c6d1f', '#b13d33', '#7a4a21'],
-  book: ['#3c5f9e', '#2f6f6a', '#5b4a8a', '#356088', '#4a6741'],
-};
+// Placeholder cover tones: muted, archival — like cloth bindings and
+// paper record sleeves. [background, initial] pairs.
+const PLACEHOLDER_TONES = [
+  ['#2d2d2a', '#e5e2dd'],
+  ['#775a19', '#ffdea5'],
+  ['#474741', '#e5e2de'],
+  ['#8c7a5b', '#fcf9f5'],
+  ['#5c5c56', '#f3f0ec'],
+  ['#3d3a33', '#e9c176'],
+];
 
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => (
@@ -33,12 +39,11 @@ function esc(s) {
   ));
 }
 
-function spineColor(item) {
-  const pool = SPINES[item.kind] || SPINES.record;
+function placeholderTone(item) {
   let h = 0;
   const s = (item.creator || item.title || '').toLowerCase();
   for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
-  return pool[h % pool.length];
+  return PLACEHOLDER_TONES[h % PLACEHOLDER_TONES.length];
 }
 
 function coverSrc(item) {
@@ -59,7 +64,8 @@ function coverHtml(item, cls = 'cover') {
 
 function placeholderHtml(item, hidden = false) {
   const initial = (item.title || '?').trim().charAt(0).toUpperCase();
-  return `<div class="cover-placeholder"${hidden ? ' hidden' : ''} style="--spine:${spineColor(item)}">${esc(initial)}</div>`;
+  const [bg, ink] = placeholderTone(item);
+  return `<div class="cover-placeholder"${hidden ? ' hidden' : ''} style="--ph-bg:${bg};--ph-ink:${ink}">${esc(initial)}</div>`;
 }
 
 let toastTimer = null;
@@ -120,7 +126,8 @@ function route() {
   if (view !== 'form' && view !== 'scan') draft = null;
 
   views[view].hidden = false;
-  const tab = view === 'library' ? 'library' : view === 'backup' ? 'backup' : 'add';
+  const tab = view === 'library' || view === 'detail' ? 'library'
+    : view === 'backup' ? 'backup' : 'add';
   $$('.tabbar a').forEach((a) => a.classList.toggle('is-active', a.dataset.tab === tab));
   window.scrollTo(0, 0);
 }
@@ -168,15 +175,12 @@ function renderLibrary() {
   ).join('');
 
   grid.innerHTML = list.map((it) => `
-    <a class="item-card" href="#/item/${it.id}" style="--spine:${spineColor(it)}">
-      <span class="spine"></span>
-      <span class="card-body">
-        ${coverHtml(it)}
-        <span class="card-text">
-          <h2 class="card-title">${esc(it.title)}</h2>
-          <p class="card-creator">${esc(it.creator)}</p>
-          <p class="card-meta">${esc([it.year, it.format].filter(Boolean).join(' · ')) || esc(it.kind)}</p>
-        </span>
+    <a class="item-card" href="#/item/${it.id}">
+      <span class="cover-wrap">${coverHtml(it)}</span>
+      <span class="card-text">
+        <h2 class="card-title">${esc(it.title)}</h2>
+        <p class="card-creator">${esc(it.creator)}</p>
+        <p class="card-meta">${esc([it.year, it.format].filter(Boolean).join(' · ')) || esc(it.kind)}</p>
       </span>
     </a>`).join('');
 }
@@ -328,28 +332,24 @@ async function saveForm(ev) {
 /* ---------------- detail ---------------- */
 
 function renderDetail(item) {
+  const meta = [item.year, item.genre, item.format].filter(Boolean);
   const rows = [
-    ['Year', item.year],
-    ['Format', item.format],
     [item.kind === 'book' ? 'Publisher' : 'Label', item.publisher],
-    ['Genre', item.genre],
     ['Condition', item.condition],
-    ['Barcode', item.barcode],
+    ['Barcode', item.barcode, 'mono'],
     ['Added', new Date(item.createdAt).toLocaleDateString()],
     ['Notes', item.notes],
   ].filter(([, v]) => v);
 
   $('#detail-card').innerHTML = `
-    <div class="detail-head">
-      <div class="detail-cover">${coverHtml(item)}</div>
-      <div>
-        <span class="kind-badge ${item.kind}">${item.kind}</span>
-        <h1>${esc(item.title)}</h1>
-        <p class="detail-creator">${esc(item.creator)}</p>
-      </div>
-    </div>
+    <div class="detail-cover">${coverHtml(item)}</div>
+    <span class="kind-badge archival-label">${item.kind}</span>
+    <h1>${esc(item.title)}</h1>
+    <p class="detail-creator">${esc(item.creator)}</p>
+    ${meta.length ? `<div class="detail-meta">
+      ${meta.map((m) => `<span class="chip">${esc(m)}</span>`).join('')}</div>` : ''}
     <dl class="detail-fields">
-      ${rows.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join('')}
+      ${rows.map(([k, v, cls]) => `<div><dt>${esc(k)}</dt><dd${cls ? ` class="${cls}"` : ''}>${esc(v)}</dd></div>`).join('')}
       ${item.tags.length ? `<div><dt>Shelves</dt><dd class="tag-list">
         ${item.tags.map((t) => `<span class="chip">${esc(t)}</span>`).join('')}</dd></div>` : ''}
     </dl>`;
