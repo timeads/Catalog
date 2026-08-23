@@ -63,6 +63,8 @@ export function newItem(kind) {
     condition: '',
     tags: [],
     notes: '',
+    tracks: [], // records: [{no, title, ms}] from MusicBrainz
+    mbid: '', // MusicBrainz release id, when known
     coverUrl: '',
     coverBlob: null,
     createdAt: now,

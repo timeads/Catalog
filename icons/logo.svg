@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <g fill="none" stroke="#1c1c1a" stroke-linecap="round">
+    <!-- top lip: cover board + page stack, slanted up to the right -->
+    <path d="M136 144 L310 100" stroke-width="26"/>
+    <path d="M148 188 L316 146" stroke-width="15"/>
+    <!-- fore-edge grooves fanning out as a record -->
+    <path d="M316 146 a158 158 0 0 1 0 276" stroke-width="22"/>
+    <path d="M312 194 a114 114 0 0 1 0 182" stroke-width="20"/>
+  </g>
+  <g fill="#1c1c1a">
+    <!-- cover: spine left, pages flowing out as a dark wave mid-height -->
+    <path d="M148 188
+             L268 158
+             Q288 153 288 174
+             L288 196
+             Q346 220 346 288
+             Q346 352 288 378
+             L288 412
+             Q288 432 268 435
+             L172 449
+             Q148 452 148 428 Z"/>
+  </g>
+  <!-- white groove carved through the wave -->
+  <path d="M288 232 Q310 252 310 288 Q310 322 288 344" fill="none"
+        stroke="#fcf9f5" stroke-width="18" stroke-linecap="round"/>
+  <!-- hinge stripe -->
+  <rect x="176" y="204" width="16" height="222" rx="8" fill="#fcf9f5" transform="rotate(-3 184 315)"/>
+</svg>

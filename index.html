@@ -19,76 +19,144 @@
 
 <header class="topbar">
   <a class="brand" href="#/">
-    <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
-      <rect x="3" y="4" width="5" height="24" rx="1"/>
-      <rect x="10" y="7" width="5" height="21" rx="1"/>
-      <circle cx="23.5" cy="20.5" r="7.5"/>
-      <circle class="hole" cx="23.5" cy="20.5" r="1.6"/>
+    <svg class="brand-mark" viewBox="70 60 320 420" aria-hidden="true">
+      <g fill="none" stroke="currentColor" stroke-linecap="round">
+        <path d="M136 144 L310 100" stroke-width="26"/>
+        <path d="M148 188 L316 146" stroke-width="15"/>
+        <path d="M316 146 a158 158 0 0 1 0 276" stroke-width="22"/>
+        <path d="M312 194 a114 114 0 0 1 0 182" stroke-width="20"/>
+      </g>
+      <path fill="currentColor" d="M148 188 L268 158 Q288 153 288 174 L288 196 Q346 220 346 288 Q346 352 288 378 L288 412 Q288 432 268 435 L172 449 Q148 452 148 428 Z"/>
+      <path d="M288 232 Q310 252 310 288 Q310 322 288 344" fill="none"
+            stroke="var(--surface)" stroke-width="18" stroke-linecap="round"/>
+      <rect x="176" y="204" width="16" height="222" rx="8" fill="var(--surface)" transform="rotate(-3 184 315)"/>
     </svg>
     <span class="brand-name">Stacks</span>
   </a>
-  <span class="brand-tag">records &amp; books</span>
 </header>
 
 <main id="main">
 
-  <!-- ============ Library ============ -->
-  <section id="view-library" class="view" hidden>
+  <!-- ============ Dashboard ============ -->
+  <section id="view-dashboard" class="view" hidden>
+    <div class="stat-cards">
+      <a class="stat-card" href="#/collection/book">
+        <span class="stat-kind">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5.5C10.6 4.2 8.7 3.5 6.5 3.5c-1.3 0-2.5.2-3.5.7v14.6c1-.4 2.2-.7 3.5-.7 2.2 0 4.1.7 5.5 2 1.4-1.3 3.3-2 5.5-2 1.3 0 2.5.2 3.5.7V4.2c-1-.4-2.2-.7-3.5-.7-2.2 0-4.1.7-5.5 2zm0 2.1c1.1-1 2.6-1.6 4.5-1.6 1 0 1.8.1 2.5.4v10.4c-.8-.2-1.6-.3-2.5-.3-1.7 0-3.2.4-4.5 1.2z"/></svg>
+          Books
+        </span>
+        <span class="stat-num" id="stat-books">0</span>
+        <span class="stat-label">Volumes indexed</span>
+      </a>
+      <a class="stat-card" href="#/collection/record">
+        <span class="stat-kind">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 2a8 8 0 1 1 0 16 8 8 0 0 1 0-16zm0 5a3 3 0 1 0 0 6 3 3 0 0 0 0-6zm0 2a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"/></svg>
+          Records
+        </span>
+        <span class="stat-num" id="stat-records">0</span>
+        <span class="stat-label">Vinyl pressings</span>
+      </a>
+    </div>
+
+    <div class="dash-actions">
+      <a class="btn btn-primary btn-block" href="#/add">＋ Add item</a>
+      <a class="btn btn-quiet btn-block" href="#/scan">
+        <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h1.5v14H3zM6 5h1v14H6zM8.5 5H11v14H8.5zM12.5 5h1v14h-1zM15 5h2v14h-2zM18.5 5h1v14h-1zM21 5h1v14h-1z"/></svg>
+        Scan barcode
+      </a>
+    </div>
+
+    <div class="section-head">
+      <h2>Recently added</h2>
+      <a class="section-link" href="#/collection">View archive →</a>
+    </div>
+    <div id="recent-rail" class="recent-rail"></div>
+    <div id="dash-empty" class="empty-state" hidden>
+      <p class="empty-title">Nothing on the shelf yet.</p>
+      <p>Add your first record or book — scan its barcode, look it up by name, or photograph the cover.</p>
+      <a class="btn btn-primary" href="#/add">Add item</a>
+    </div>
+  </section>
+
+  <!-- ============ Collection ============ -->
+  <section id="view-collection" class="view" hidden>
     <div class="library-tools">
-      <input id="search-input" class="search-input" type="search"
-             placeholder="Search titles, artists, authors, tags…" autocomplete="off">
+      <div class="search-field">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 2a8 8 0 1 0 4.9 14.3l5.4 5.4 1.4-1.4-5.4-5.4A8 8 0 0 0 10 2zm0 2a6 6 0 1 1 0 12 6 6 0 0 1 0-12z"/></svg>
+        <input id="search-input" type="search" placeholder="Search the collection…" autocomplete="off">
+      </div>
       <div class="filter-row">
         <div class="kind-filter" role="group" aria-label="Filter by kind">
           <button class="chip kind-chip is-active" data-kind="all">All</button>
-          <button class="chip kind-chip" data-kind="record">Records</button>
           <button class="chip kind-chip" data-kind="book">Books</button>
+          <button class="chip kind-chip" data-kind="record">Records</button>
         </div>
+        <div class="view-toggle" role="group" aria-label="Layout">
+          <button id="view-grid-btn" class="view-btn is-active" type="button" aria-label="Grid view">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/></svg>
+          </button>
+          <button id="view-list-btn" class="view-btn" type="button" aria-label="List view">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v3H4zM4 10.5h16v3H4zM4 16h16v3H4z"/></svg>
+          </button>
+        </div>
+      </div>
+      <div id="tag-row" class="tag-row" hidden></div>
+      <div class="filter-status">
         <select id="sort-select" class="sort-select" aria-label="Sort by">
           <option value="added">Recently added</option>
           <option value="title">Title A–Z</option>
           <option value="creator">Artist / author A–Z</option>
           <option value="year">Year</option>
         </select>
+        <button id="clear-filters" class="clear-link" type="button" hidden>Clear all</button>
       </div>
-      <div id="tag-row" class="tag-row" hidden></div>
     </div>
     <p id="library-count" class="library-count"></p>
     <div id="library-grid" class="library-grid"></div>
     <div id="library-empty" class="empty-state" hidden>
       <p class="empty-title">Nothing on the shelf yet.</p>
-      <p>Add your first record or book — scan its barcode, look it up by name, or just type it in.</p>
-      <a class="btn btn-primary" href="#/add">Add something</a>
+      <p>Add your first record or book to start the archive.</p>
+      <a class="btn btn-primary" href="#/add">Add item</a>
     </div>
   </section>
 
   <!-- ============ Add menu ============ -->
-  <section id="view-add" class="view" hidden>
-    <h1 class="view-title">Add to the catalog</h1>
+  <section id="view-add" class="view view-modal" hidden>
+    <div class="modal-head">
+      <a class="modal-close" href="#/" aria-label="Close">✕</a>
+      <h1 class="modal-title">Add item</h1>
+    </div>
+    <p class="modal-sub">Select a method to add a new volume or artifact to your collection.</p>
     <div class="add-menu">
       <a class="add-option" href="#/scan">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 5h1.5v14H2zM5 5h1v14H5zM7.5 5H10v14H7.5zM11.5 5h1v14h-1zM14 5h2v14h-2zM17.5 5h1v14h-1zM20 5h2v14h-2z"/></svg>
-        <span class="add-option-name">Scan a barcode</span>
-        <span class="add-option-hint">Point the camera at the UPC or ISBN — details fill in from the global databases.</span>
+        <span class="add-option-name">Scan barcode</span>
+        <span class="add-option-hint">Quickly add via ISBN or UPC code — details fill in from the global databases.</span>
       </a>
+      <label class="add-option" for="photo-file">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3l-1.5 2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-3.5L15 3H9zm3 5.5a5 5 0 1 1 0 10 5 5 0 0 1 0-10zm0 2a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"/></svg>
+        <span class="add-option-name">Take a photo</span>
+        <span class="add-option-hint">Photograph the cover of your copy, then fill in the details.</span>
+      </label>
+      <input id="photo-file" type="file" accept="image/*" capture="environment" hidden>
       <a class="add-option" href="#/search">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 2a8 8 0 1 0 4.9 14.3l5.4 5.4 1.4-1.4-5.4-5.4A8 8 0 0 0 10 2zm0 2a6 6 0 1 1 0 12 6 6 0 0 1 0-12z"/></svg>
-        <span class="add-option-name">Look it up by name</span>
-        <span class="add-option-hint">No barcode? Search title or artist online and pick the match.</span>
-      </a>
-      <a class="add-option" href="#/new">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20l1-4L16.5 4.5a2.1 2.1 0 0 1 3 3L8 19l-4 1zm12-13l1 1"/></svg>
-        <span class="add-option-name">Type it in</span>
-        <span class="add-option-hint">Quick entry — only a title is required. Snap the cover if you like.</span>
+        <span class="add-option-name">Search manually</span>
+        <span class="add-option-hint">Enter title, author, or artist — for anything that predates barcodes.</span>
       </a>
     </div>
+    <p class="aside-note modal-sub">Prefer to just type? <a href="#/new">Start with a blank form</a>.</p>
   </section>
 
   <!-- ============ Scanner ============ -->
   <section id="view-scan" class="view" hidden>
-    <h1 class="view-title">Scan a barcode</h1>
+    <div class="modal-head">
+      <a class="modal-close" href="#/" aria-label="Close">✕</a>
+      <h1 class="modal-title">Scan barcode</h1>
+    </div>
     <div class="scanner-frame">
       <video id="scan-video" playsinline muted></video>
-      <div class="scan-reticle" aria-hidden="true"></div>
+      <div class="scan-reticle" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
     </div>
     <p id="scan-status" class="scan-status" role="status">Starting camera…</p>
     <form id="scan-manual" class="scan-manual">
@@ -103,7 +171,7 @@
 
   <!-- ============ Online search ============ -->
   <section id="view-search" class="view" hidden>
-    <h1 class="view-title">Look it up by name</h1>
+    <h1 class="view-title">Search manually</h1>
     <form id="online-form" class="online-form">
       <div class="kind-filter" role="group" aria-label="What are you looking for?">
         <button type="button" class="chip kind-chip is-active" data-searchkind="record">Record</button>
@@ -132,7 +200,7 @@
       <div class="cover-editor">
         <div id="form-cover" class="cover-preview" aria-hidden="true"></div>
         <div class="cover-actions">
-          <label class="btn btn-quiet" for="cover-file">Snap or choose cover</label>
+          <label class="btn btn-quiet" for="cover-file">Add photo of your copy</label>
           <input id="cover-file" type="file" accept="image/*" capture="environment" hidden>
           <button id="cover-clear" class="btn btn-quiet" type="button" hidden>Remove photo</button>
         </div>
@@ -200,11 +268,11 @@
 
   <!-- ============ Item detail ============ -->
   <section id="view-detail" class="view" hidden>
-    <article id="detail-card" class="catalog-card"></article>
-    <div class="form-actions">
-      <a id="detail-edit" class="btn btn-primary" href="#">Edit</a>
-      <button id="detail-delete" class="btn btn-danger" type="button">Remove from catalog</button>
+    <div class="modal-head">
+      <button id="detail-back" class="modal-close" type="button" aria-label="Back">←</button>
+      <h1 class="modal-title">Item detail</h1>
     </div>
+    <article id="detail-card" class="catalog-card"></article>
   </section>
 
   <!-- ============ Backup ============ -->
@@ -228,9 +296,13 @@
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3h4v18H3zM9 3h4v18H9zM16.2 4.1l3.9-.8 3 17.6-3.9.8z"/></svg>
     Library
   </a>
-  <a href="#/add" data-tab="add">
-    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 4h2v7h7v2h-7v7h-2v-7H4v-2h7z"/></svg>
-    Add
+  <a href="#/collection" data-tab="search">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 2a8 8 0 1 0 4.9 14.3l5.4 5.4 1.4-1.4-5.4-5.4A8 8 0 0 0 10 2zm0 2a6 6 0 1 1 0 12 6 6 0 0 1 0-12z"/></svg>
+    Search
+  </a>
+  <a href="#/scan" data-tab="scan">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h1.5v14H3zM6 5h1v14H6zM8.5 5H11v14H8.5zM12.5 5h1v14h-1zM15 5h2v14h-2zM18.5 5h1v14h-1zM21 5h1v14h-1z"/></svg>
+    Scan
   </a>
   <a href="#/backup" data-tab="backup">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l5 5h-3v6h-4V8H7zM5 17h14v2H5z"/></svg>

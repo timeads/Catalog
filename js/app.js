@@ -1,5 +1,5 @@
 import { getAllItems, putItem, deleteItem, newItem } from './db.js';
-import { lookupBarcode, searchBooks, searchRecords } from './lookup.js';
+import { lookupBarcode, searchBooks, searchRecords, fetchTracks } from './lookup.js';
 import { startScanner } from './scanner.js';
 
 /* ---------------- state ---------------- */
@@ -13,6 +13,9 @@ let searchKind = 'record'; // online-search toggle
 let draft = null; // item being created/edited in the form
 let stopScan = null; // active scanner's stop()
 const coverUrls = new Map(); // item id -> object URL for its cover blob
+
+let viewMode = 'grid'; // collection layout: 'grid' | 'list'
+try { viewMode = localStorage.getItem('stacks-view') === 'list' ? 'list' : 'grid'; } catch {}
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
@@ -80,7 +83,8 @@ function toast(msg) {
 /* ---------------- routing ---------------- */
 
 const views = {
-  library: $('#view-library'),
+  dashboard: $('#view-dashboard'),
+  collection: $('#view-collection'),
   add: $('#view-add'),
   scan: $('#view-scan'),
   search: $('#view-search'),
@@ -96,12 +100,12 @@ function route() {
   if (stopScan) { stopScan(); stopScan = null; }
   Object.values(views).forEach((v) => { v.hidden = true; });
 
-  let view = 'library';
-  if (path === 'add') view = 'add';
+  let view = 'dashboard';
+  if (path === 'collection') view = 'collection';
+  else if (path === 'add') view = 'add';
   else if (path === 'scan') view = 'scan';
   else if (path === 'search') view = 'search';
-  else if (path === 'new') view = 'form';
-  else if (path === 'edit') view = 'form';
+  else if (path === 'new' || path === 'edit') view = 'form';
   else if (path === 'item') view = 'detail';
   else if (path === 'backup') view = 'backup';
 
@@ -120,28 +124,69 @@ function route() {
     if (!item) { location.hash = '#/'; return; }
     renderDetail(item);
   }
-  if (view === 'library') renderLibrary();
+  if (view === 'dashboard') renderDashboard();
+  if (view === 'collection') {
+    if (arg === 'book' || arg === 'record') {
+      filterKind = arg;
+      $$('.kind-chip[data-kind]').forEach((x) => x.classList.toggle('is-active', x.dataset.kind === arg));
+    }
+    renderCollection();
+  }
   if (view === 'scan') beginScan();
   if (view === 'backup') renderBackup();
   if (view !== 'form' && view !== 'scan') draft = null;
 
   views[view].hidden = false;
-  const tab = view === 'library' || view === 'detail' ? 'library'
-    : view === 'backup' ? 'backup' : 'add';
+  const tab =
+    view === 'dashboard' || view === 'add' ? 'library'
+    : view === 'collection' || view === 'detail' ? 'search'
+    : view === 'scan' ? 'scan'
+    : view === 'backup' ? 'backup' : 'library';
   $$('.tabbar a').forEach((a) => a.classList.toggle('is-active', a.dataset.tab === tab));
   window.scrollTo(0, 0);
 }
 
-/* ---------------- library ---------------- */
+/* ---------------- dashboard ---------------- */
+
+function renderDashboard() {
+  const records = items.filter((i) => i.kind === 'record').length;
+  $('#stat-books').textContent = items.length - records;
+  $('#stat-records').textContent = records;
+
+  const recent = [...items]
+    .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
+    .slice(0, 12);
+  const rail = $('#recent-rail');
+  const empty = items.length === 0;
+  $('#dash-empty').hidden = !empty;
+  rail.hidden = empty;
+  $('.section-head').hidden = empty;
+  rail.innerHTML = recent.map((it) => `
+    <a class="rail-card" href="#/item/${it.id}">
+      <span class="cover-wrap">
+        ${it.tags[0] ? `<span class="cover-tag">${esc(it.tags[0])}</span>` : ''}
+        ${coverHtml(it)}
+      </span>
+      <p class="card-title">${esc(it.title)}</p>
+      <p class="card-creator">${esc(it.creator)}</p>
+    </a>`).join('');
+}
+
+/* ---------------- collection ---------------- */
+
+// Case- and accent-insensitive ("Café" matches "cafe").
+function fold(s) {
+  return String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
 
 function visibleItems() {
-  const terms = searchQuery.toLowerCase().split(/\s+/).filter(Boolean);
-  let list = items.filter((it) => {
+  const terms = fold(searchQuery).split(/\s+/).filter(Boolean);
+  const list = items.filter((it) => {
     if (filterKind !== 'all' && it.kind !== filterKind) return false;
     if (filterTag && !it.tags.includes(filterTag)) return false;
     if (terms.length) {
-      const hay = [it.title, it.creator, it.publisher, it.genre, it.year,
-        it.format, it.notes, it.barcode, ...(it.tags || [])].join(' ').toLowerCase();
+      const hay = fold([it.title, it.creator, it.publisher, it.genre, it.year,
+        it.format, it.notes, it.barcode, ...(it.tags || [])].join(' '));
       if (!terms.every((t) => hay.includes(t))) return false;
     }
     return true;
@@ -155,7 +200,31 @@ function visibleItems() {
   return list.sort(by[sortBy] || by.added);
 }
 
-function renderLibrary() {
+function cardHtml(it) {
+  return `
+    <a class="item-card" href="#/item/${it.id}">
+      <span class="cover-wrap">${coverHtml(it)}</span>
+      <span class="card-text">
+        <h2 class="card-title">${esc(it.title)}</h2>
+        <p class="card-creator">${esc(it.creator)}</p>
+        <p class="card-meta">${esc([it.year, it.format].filter(Boolean).join(' · ')) || esc(it.kind)}</p>
+      </span>
+    </a>`;
+}
+
+function rowHtml(it) {
+  return `
+    <a class="item-row" href="#/item/${it.id}">
+      <span class="row-cover">${coverHtml(it)}</span>
+      <span class="row-main">
+        <p class="row-title">${esc(it.title)}</p>
+        <p class="row-creator">${esc(it.creator)}</p>
+      </span>
+      <span class="row-meta">${esc(it.year || '')}</span>
+    </a>`;
+}
+
+function renderCollection() {
   const list = visibleItems();
   const grid = $('#library-grid');
   const records = items.filter((i) => i.kind === 'record').length;
@@ -174,15 +243,13 @@ function renderLibrary() {
     `<button class="chip${t === filterTag ? ' is-active' : ''}" data-tag="${esc(t)}">${esc(t)}</button>`
   ).join('');
 
-  grid.innerHTML = list.map((it) => `
-    <a class="item-card" href="#/item/${it.id}">
-      <span class="cover-wrap">${coverHtml(it)}</span>
-      <span class="card-text">
-        <h2 class="card-title">${esc(it.title)}</h2>
-        <p class="card-creator">${esc(it.creator)}</p>
-        <p class="card-meta">${esc([it.year, it.format].filter(Boolean).join(' · ')) || esc(it.kind)}</p>
-      </span>
-    </a>`).join('');
+  $('#clear-filters').hidden = !(filterTag || filterKind !== 'all' || searchQuery);
+  $('#view-grid-btn').classList.toggle('is-active', viewMode === 'grid');
+  $('#view-list-btn').classList.toggle('is-active', viewMode === 'list');
+
+  grid.classList.toggle('is-list', viewMode === 'list');
+  grid.classList.toggle('has-featured', viewMode === 'grid' && list.length > 0);
+  grid.innerHTML = list.map(viewMode === 'list' ? rowHtml : cardHtml).join('');
 }
 
 /* ---------------- scanning ---------------- */
@@ -217,6 +284,16 @@ async function onBarcode(code) {
 
 function openDraftFrom(found) {
   draft = Object.assign(newItem(found.kind), found);
+  // A record picked from name-search doesn't have its tracklist yet.
+  if (found.kind === 'record' && found.mbid && !(found.tracks || []).length) {
+    const target = draft;
+    fetchTracks(found.mbid).then((tracks) => {
+      if (tracks && (draft === target || items.some((i) => i.id === target.id))) {
+        target.tracks = tracks;
+        if (items.some((i) => i.id === target.id)) putItem(target);
+      }
+    });
+  }
   toast(`Found “${found.title}” — check the details, then save.`);
   location.hash = '#/new';
 }
@@ -263,7 +340,7 @@ function renderForm() {
   const form = $('#item-form');
   const isEdit = items.some((i) => i.id === draft.id);
   $('#form-title').textContent = isEdit ? 'Edit item'
-    : draft.title ? 'Check & save' : 'Type it in';
+    : draft.title ? 'Check & save' : 'New item';
   setFormKind(draft.kind);
   for (const name of ['title', 'creator', 'year', 'format', 'publisher', 'genre', 'barcode', 'condition', 'notes']) {
     form.elements[name].value = draft[name] || '';
@@ -290,18 +367,35 @@ async function shrinkImage(file, maxSide = 900) {
   return new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.82));
 }
 
+async function fileToCover(file) {
+  try {
+    return await shrinkImage(file);
+  } catch {
+    return file; // keep the original if decoding fails
+  }
+}
+
 async function onCoverPicked(ev) {
   const file = ev.target.files && ev.target.files[0];
   ev.target.value = '';
   if (!file) return;
-  try {
-    draft.coverBlob = await shrinkImage(file);
-  } catch {
-    draft.coverBlob = file; // keep the original if decoding fails
-  }
+  draft.coverBlob = await fileToCover(file);
   draft.coverUrl = '';
   coverUrls.delete(draft.id);
   renderFormCover();
+}
+
+// "Take a photo" on the Add screen: the shutter IS the entry point — the
+// photo becomes the new item's cover, then the form opens for details.
+async function onPhotoPicked(ev) {
+  const file = ev.target.files && ev.target.files[0];
+  ev.target.value = '';
+  if (!file) return;
+  draft = newItem('record');
+  draft.coverBlob = await fileToCover(file);
+  toast('Cover captured — now fill in the details.');
+  location.hash = '#/new';
+  if (views.form && !views.form.hidden) renderFormCover();
 }
 
 async function saveForm(ev) {
@@ -326,41 +420,85 @@ async function saveForm(ev) {
   const saved = draft;
   draft = null;
   toast(`“${saved.title}” is on the shelf.`);
-  location.hash = '#/';
+  location.hash = `#/item/${saved.id}`;
+  cacheRemoteCover(saved);
+}
+
+// Pull a looked-up cover into the catalog itself, so the image survives
+// offline and travels with backups. Best effort — some cover hosts don't
+// allow cross-origin reads, and the URL keeps working regardless.
+async function cacheRemoteCover(item) {
+  if (item.coverBlob || !item.coverUrl) return;
+  try {
+    const res = await fetch(item.coverUrl);
+    if (!res.ok) return;
+    const blob = await res.blob();
+    if (!blob.type.startsWith('image/') || !blob.size) return;
+    const current = items.find((i) => i.id === item.id);
+    if (!current || current.coverBlob || current.coverUrl !== item.coverUrl) return;
+    current.coverBlob = blob;
+    coverUrls.delete(current.id);
+    await putItem(current);
+  } catch {
+    // keep the remote URL only
+  }
 }
 
 /* ---------------- detail ---------------- */
 
+function fmtMs(ms) {
+  const s = Math.round(ms / 1000);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
 function renderDetail(item) {
-  const meta = [item.year, item.genre, item.format].filter(Boolean);
+  const meta = [item.year, item.genre, item.format, item.condition].filter(Boolean);
   const rows = [
     [item.kind === 'book' ? 'Publisher' : 'Label', item.publisher],
-    ['Condition', item.condition],
     ['Barcode', item.barcode, 'mono'],
     ['Added', new Date(item.createdAt).toLocaleDateString()],
     ['Notes', item.notes],
   ].filter(([, v]) => v);
 
+  const tracks = item.tracks || [];
+  const totalMs = tracks.reduce((sum, t) => sum + (t.ms || 0), 0);
+  const tracklist = tracks.length ? `
+    <div class="detail-section-head">
+      <h2>Tracklist</h2>
+      ${totalMs ? `<span class="total-time">${fmtMs(totalMs)} total time</span>` : ''}
+    </div>
+    <ol class="tracklist">
+      ${tracks.map((t) => `<li>
+        <span class="track-no">${esc(t.no)}</span>
+        <span class="track-title">${esc(t.title)}</span>
+        <span class="track-time">${t.ms ? fmtMs(t.ms) : ''}</span>
+      </li>`).join('')}
+    </ol>` : '';
+
   $('#detail-card').innerHTML = `
     <div class="detail-cover">${coverHtml(item)}</div>
+    <div class="detail-actions">
+      <a class="btn btn-primary" href="#/edit/${item.id}">✎ Edit</a>
+      <button id="detail-delete" class="btn btn-danger" type="button">Remove</button>
+    </div>
     <span class="kind-badge archival-label">${item.kind}</span>
     <h1>${esc(item.title)}</h1>
     <p class="detail-creator">${esc(item.creator)}</p>
     ${meta.length ? `<div class="detail-meta">
       ${meta.map((m) => `<span class="chip">${esc(m)}</span>`).join('')}</div>` : ''}
+    ${tracklist}
     <dl class="detail-fields">
       ${rows.map(([k, v, cls]) => `<div><dt>${esc(k)}</dt><dd${cls ? ` class="${cls}"` : ''}>${esc(v)}</dd></div>`).join('')}
       ${item.tags.length ? `<div><dt>Shelves</dt><dd class="tag-list">
         ${item.tags.map((t) => `<span class="chip">${esc(t)}</span>`).join('')}</dd></div>` : ''}
     </dl>`;
-  $('#detail-edit').href = `#/edit/${item.id}`;
   $('#detail-delete').onclick = async () => {
     if (!confirm(`Remove “${item.title}” from the catalog?`)) return;
     await deleteItem(item.id);
     items = items.filter((i) => i.id !== item.id);
     coverUrls.delete(item.id);
     toast('Removed.');
-    location.hash = '#/';
+    location.hash = '#/collection';
   };
 }
 
@@ -428,6 +566,7 @@ async function importJson(ev) {
       const { coverData, ...rest } = raw;
       const item = Object.assign(newItem(rest.kind === 'book' ? 'book' : 'record'), rest);
       item.tags = Array.isArray(item.tags) ? item.tags.map(String) : [];
+      item.tracks = Array.isArray(item.tracks) ? item.tracks : [];
       if (coverData && coverData.startsWith('data:')) {
         item.coverBlob = await (await fetch(coverData)).blob();
       }
@@ -450,23 +589,33 @@ function bindEvents() {
 
   $('#search-input').addEventListener('input', (e) => {
     searchQuery = e.target.value;
-    renderLibrary();
+    renderCollection();
   });
   $('#sort-select').addEventListener('change', (e) => {
     sortBy = e.target.value;
-    renderLibrary();
+    renderCollection();
   });
   $$('.kind-chip[data-kind]').forEach((b) => b.addEventListener('click', () => {
     filterKind = b.dataset.kind;
     $$('.kind-chip[data-kind]').forEach((x) => x.classList.toggle('is-active', x === b));
-    renderLibrary();
+    renderCollection();
   }));
   $('#tag-row').addEventListener('click', (e) => {
     const btn = e.target.closest('[data-tag]');
     if (!btn) return;
     filterTag = filterTag === btn.dataset.tag ? null : btn.dataset.tag;
-    renderLibrary();
+    renderCollection();
   });
+  $('#clear-filters').addEventListener('click', () => {
+    filterKind = 'all';
+    filterTag = null;
+    searchQuery = '';
+    $('#search-input').value = '';
+    $$('.kind-chip[data-kind]').forEach((x) => x.classList.toggle('is-active', x.dataset.kind === 'all'));
+    renderCollection();
+  });
+  $('#view-grid-btn').addEventListener('click', () => setViewMode('grid'));
+  $('#view-list-btn').addEventListener('click', () => setViewMode('list'));
 
   $('#scan-manual').addEventListener('submit', (e) => {
     e.preventDefault();
@@ -484,16 +633,26 @@ function bindEvents() {
   $('#item-form').addEventListener('submit', saveForm);
   $('#form-cancel').addEventListener('click', () => { draft = null; history.back(); });
   $('#cover-file').addEventListener('change', onCoverPicked);
+  $('#photo-file').addEventListener('change', onPhotoPicked);
   $('#cover-clear').addEventListener('click', () => {
     draft.coverBlob = null;
     draft.coverUrl = '';
     coverUrls.delete(draft.id);
     renderFormCover();
   });
+  $('#detail-back').addEventListener('click', () => {
+    if (history.length > 1) history.back(); else location.hash = '#/collection';
+  });
 
   $('#export-json').addEventListener('click', exportJson);
   $('#export-csv').addEventListener('click', exportCsv);
   $('#import-file').addEventListener('change', importJson);
+}
+
+function setViewMode(mode) {
+  viewMode = mode;
+  try { localStorage.setItem('stacks-view', mode); } catch {}
+  renderCollection();
 }
 
 async function main() {

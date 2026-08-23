@@ -106,7 +106,24 @@ function fromMusicBrainzRelease(r, barcode) {
     genre: '',
     coverUrl: r.id ? `https://coverartarchive.org/release/${r.id}/front-250` : '',
     barcode: barcode || r.barcode || '',
+    mbid: r.id || '',
   };
+}
+
+// Track titles and durations for a MusicBrainz release.
+// Returns [{no, title, ms}] or null.
+export async function fetchTracks(mbid) {
+  if (!mbid) return null;
+  const data = await getJson(
+    `https://musicbrainz.org/ws/2/release/${mbid}?inc=recordings&fmt=json`
+  );
+  if (!data || !data.media) return null;
+  const tracks = data.media.flatMap((m) => (m.tracks || []).map((t) => ({
+    no: t.number || String(t.position || ''),
+    title: t.title || '',
+    ms: t.length || 0,
+  })));
+  return tracks.length ? tracks : null;
 }
 
 async function musicBrainzByBarcode(code) {
@@ -153,5 +170,10 @@ export async function lookupBarcode(rawCode) {
   }
   // Not an ISBN: almost certainly a record UPC/EAN. Fall back to Google Books
   // in case it's a barcoded book without a 978 prefix.
-  return (await musicBrainzByBarcode(code)) || (await googleBooks(code, code));
+  const release = await musicBrainzByBarcode(code);
+  if (release) {
+    release.tracks = (await fetchTracks(release.mbid)) || [];
+    return release;
+  }
+  return googleBooks(code, code);
 }
