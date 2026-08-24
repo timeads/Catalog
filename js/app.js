@@ -880,7 +880,10 @@ function renderDetail(item) {
           ${i === 0 ? '<span class="thumb-flag">Cover</span>' : ''}
           ${p.label && i !== 0 ? `<span class="thumb-flag quiet">${esc(p.label)}</span>` : ''}
         </button>`).join('')}
-      <label class="photo-add" for="detail-photo-file" title="Add photos">＋</label>
+      <label class="photo-add" for="detail-photo-camera" title="Take a photo">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3l-1.5 2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-3.5L15 3H9zm3 5.5a5 5 0 1 1 0 10 5 5 0 0 1 0-10zm0 2a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"/></svg>
+      </label>
+      <label class="photo-add" for="detail-photo-file" title="Add from library">＋</label>
     </div>
     ${shown && photos.length > 1 ? `
       <div class="photo-actions">
@@ -1432,6 +1435,8 @@ function bindEvents() {
     renderFormCover();
   });
   $('#detail-photo-file').addEventListener('change', onDetailPhotosPicked);
+  $('#detail-photo-camera').addEventListener('change', onDetailPhotosPicked);
+  $('#cover-file-lib').addEventListener('change', onCoverPicked);
   $('#detail-back').addEventListener('click', () => {
     if (history.length > 1) history.back(); else location.hash = '#/library';
   });

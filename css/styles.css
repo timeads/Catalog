@@ -1103,6 +1103,8 @@ input:focus, textarea:focus, select:focus {
 
 .photo-add:hover { border-color: var(--accent); color: var(--accent); }
 
+.photo-add svg { width: 24px; height: 24px; fill: currentColor; }
+
 .photo-actions { display: flex; gap: 8px; margin: 2px 0 6px; }
 
 .photo-actions .btn { padding: 8px 14px; font-size: 13px; }
