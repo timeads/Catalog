@@ -25,6 +25,9 @@ own.
   cover. **Find in the archives** pulls every image the open databases hold
   for the item: for records that's the Cover Art Archive set (front, back,
   labels, booklets), for books the Open Library edition covers.
+- **Hear it**: every track row on a record's page has a play button — a
+  30-second preview found via the iTunes Search API (previews are of the
+  digital release; pre-digital rarities may have none).
 - **Search & organize**: instant accent-insensitive full-text search across
   every field, kind filters, free-form shelves/tags, grid or list layouts,
   and sorting.

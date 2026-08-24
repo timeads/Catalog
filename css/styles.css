@@ -1183,6 +1183,35 @@ input:focus, textarea:focus, select:focus {
   font-size: 14px;
 }
 
+.tracklist.has-previews li { grid-template-columns: 30px 42px 1fr auto; padding-left: 8px; }
+
+.track-play {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: none;
+  background: none;
+  border-radius: 50%;
+  cursor: pointer;
+  color: var(--ink-3);
+}
+
+.track-play svg { width: 18px; height: 18px; fill: currentColor; }
+
+.track-play .glyph-stop { display: none; }
+
+.track-play:hover { background: var(--surface-2); color: var(--accent); }
+
+.track-play.is-loading { opacity: 0.4; }
+
+.track-play.is-playing { color: var(--accent); }
+
+.track-play.is-playing .glyph-play { display: none; }
+
+.track-play.is-playing .glyph-stop { display: block; }
+
 .tracklist li + li { border-top: 1px solid var(--border); }
 
 .tracklist .track-no {

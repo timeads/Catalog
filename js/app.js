@@ -129,6 +129,7 @@ function route() {
   path = ROUTE_ALIASES[path] || path;
 
   if (stopScan) { stopScan(); stopScan = null; }
+  stopPreview();
   closeSheet();
   Object.values(views).forEach((v) => { v.hidden = true; });
 
@@ -608,6 +609,81 @@ async function cachePhotoBlobs(item) {
   }
 }
 
+/* ---------------- track previews ---------------- */
+
+// 30-second previews from the iTunes Search API — keyless and reachable
+// from the browser. Previews are of the digital release, so pre-digital
+// rarities often have none; the row says so instead of failing silently.
+
+const previewCache = new Map(); // folded "artist|title" -> url or null
+let previewAudio = null;
+let previewKey = '';
+
+function jsonp(url) {
+  return new Promise((resolve, reject) => {
+    const cb = `itunes_cb_${Math.random().toString(36).slice(2)}`;
+    const script = document.createElement('script');
+    const timer = setTimeout(() => { cleanup(); reject(new Error('timeout')); }, 8000);
+    function cleanup() {
+      clearTimeout(timer);
+      delete window[cb];
+      script.remove();
+    }
+    window[cb] = (data) => { cleanup(); resolve(data); };
+    script.onerror = () => { cleanup(); reject(new Error('load failed')); };
+    script.src = `${url}&callback=${cb}`;
+    document.head.appendChild(script);
+  });
+}
+
+async function findPreviewUrl(artist, title) {
+  const key = fold(`${artist}|${title}`);
+  if (previewCache.has(key)) return previewCache.get(key);
+  const url = `https://itunes.apple.com/search?term=${encodeURIComponent(`${artist} ${title}`)}&media=music&entity=song&limit=5`;
+  let data = null;
+  try {
+    const res = await fetch(url);
+    if (res.ok) data = await res.json();
+  } catch { /* CORS or offline — try JSONP below */ }
+  if (!data) {
+    try { data = await jsonp(url); } catch { data = null; }
+  }
+  const results = (data && data.results) || [];
+  const wanted = fold(title).slice(0, 12);
+  const hit = results.find((r) => fold(r.trackName || '').includes(wanted)) || results[0];
+  const preview = (hit && hit.previewUrl) || null;
+  previewCache.set(key, preview);
+  return preview;
+}
+
+function stopPreview() {
+  if (previewAudio) {
+    previewAudio.pause();
+    previewAudio = null;
+  }
+  previewKey = '';
+  $$('.track-play.is-playing').forEach((b) => b.classList.remove('is-playing'));
+}
+
+async function togglePreview(item, track, btn) {
+  const key = `${item.id}|${track.no}`;
+  if (previewKey === key) { stopPreview(); return; }
+  stopPreview();
+  btn.classList.add('is-loading');
+  const url = await findPreviewUrl(item.creator, track.title);
+  btn.classList.remove('is-loading');
+  if (!url) {
+    toast(`No preview available for “${track.title}”.`);
+    return;
+  }
+  previewAudio = new Audio(url);
+  previewKey = key;
+  btn.classList.add('is-playing');
+  previewAudio.onended = stopPreview;
+  previewAudio.onerror = () => { stopPreview(); toast("The preview couldn't be played."); };
+  previewAudio.play().catch(() => { stopPreview(); toast("The preview couldn't be played."); });
+}
+
 /* ---------------- detail ---------------- */
 
 function fmtMs(ms) {
@@ -653,8 +729,11 @@ function renderDetail(item) {
       <h2>Tracklist</h2>
       ${totalMs ? `<span class="total-time">${fmtMs(totalMs)} total</span>` : ''}
     </div>
-    <ol class="tracklist">
-      ${tracks.map((t) => `<li>
+    <ol class="tracklist has-previews">
+      ${tracks.map((t, i) => `<li>
+        <button class="track-play" type="button" data-track="${i}" title="Play a 30-second preview" aria-label="Play preview of ${esc(t.title)}">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path class="glyph-play" d="M8 5.5v13l11-6.5z"/><path class="glyph-stop" d="M7 7h10v10H7z"/></svg>
+        </button>
         <span class="track-no">${esc(t.no)}</span>
         <span class="track-title">${esc(t.title)}</span>
         <span class="track-time">${t.ms ? fmtMs(t.ms) : ''}</span>
@@ -730,6 +809,9 @@ function renderDetail(item) {
 
   bindDetailPhotoEvents(item, shown);
   if (item.kind === 'record') renderDiscogsPrice(item);
+  $$('#detail-card .track-play').forEach((btn) => {
+    btn.addEventListener('click', () => togglePreview(item, tracks[Number(btn.dataset.track)], btn));
+  });
 
   $('#detail-delete').onclick = async () => {
     if (!confirm(`Remove “${item.title}” from the catalog?`)) return;

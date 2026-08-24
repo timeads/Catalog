@@ -2,7 +2,7 @@
 // connection. Metadata lookups stay network-only; covers and fonts are cached
 // as they're fetched.
 
-const VERSION = 'stacks-v9';
+const VERSION = 'stacks-v10';
 const SHELL = [
   './',
   'index.html',
