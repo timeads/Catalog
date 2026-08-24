@@ -749,12 +749,12 @@ input:focus, textarea:focus, select:focus {
 
 .view-btn.is-active { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-1); }
 
+/* Chip rows wrap — every chip stays visible, nothing scrolls sideways. */
 .tag-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 7px;
-  overflow-x: auto;
   padding-bottom: 4px;
-  scrollbar-width: thin;
 }
 
 .filter-status {
