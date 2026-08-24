@@ -158,9 +158,19 @@
 
     <div class="section-head">
       <h2>Recently added</h2>
-      <a class="section-link" href="#/library">See all</a>
+      <span class="head-tools">
+        <div class="view-toggle" role="group" aria-label="Layout">
+          <button id="home-grid-btn" class="view-btn is-active" type="button" aria-label="Grid view">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/></svg>
+          </button>
+          <button id="home-list-btn" class="view-btn" type="button" aria-label="List view">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v3H4zM4 10.5h16v3H4zM4 16h16v3H4z"/></svg>
+          </button>
+        </div>
+        <a class="section-link" href="#/library">See all</a>
+      </span>
     </div>
-    <div id="recent-rail" class="recent-rail"></div>
+    <div id="recent-grid" class="library-grid recent-grid"></div>
     <div id="home-empty" class="empty-state" hidden>
       <p class="empty-title">Your collection starts here</p>
       <p>Scan a barcode, photograph a cover, or search by name. Everything you add is searchable and lives on your device.</p>

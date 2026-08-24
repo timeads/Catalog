@@ -33,6 +33,8 @@ let pendingReload = false; // a new app version is ready; apply when safe
 const DEFAULT_SYNC_REPO = 'timeads/stacks-data';
 let viewMode = 'grid'; // library layout: 'grid' | 'list'
 try { viewMode = localStorage.getItem('stacks-view') === 'list' ? 'list' : 'grid'; } catch {}
+let homeViewMode = 'grid'; // Recently-added layout on Home
+try { homeViewMode = localStorage.getItem('stacks-home-view') === 'list' ? 'list' : 'grid'; } catch {}
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
@@ -252,21 +254,17 @@ function renderHome() {
 
   const recent = [...items]
     .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
-    .slice(0, 12);
-  const rail = $('#recent-rail');
+    .slice(0, 8);
+  const grid = $('#recent-grid');
   const empty = items.length === 0;
   $('#home-empty').hidden = !empty;
-  rail.hidden = empty;
+  grid.hidden = empty;
   $('#view-home .section-head').hidden = empty;
-  rail.innerHTML = recent.map((it) => `
-    <a class="rail-card" href="#/item/${it.id}">
-      <span class="cover-wrap">
-        ${it.tags[0] ? `<span class="cover-tag">${esc(it.tags[0])}</span>` : ''}
-        ${coverHtml(it)}
-      </span>
-      <p class="card-title">${esc(it.title)}</p>
-      <p class="card-creator">${esc(it.creator)}</p>
-    </a>`).join('');
+  // Same grid/list vocabulary as the library, remembered separately.
+  grid.classList.toggle('is-list', homeViewMode === 'list');
+  $('#home-grid-btn').classList.toggle('is-active', homeViewMode === 'grid');
+  $('#home-list-btn').classList.toggle('is-active', homeViewMode === 'list');
+  grid.innerHTML = recent.map(homeViewMode === 'list' ? rowHtml : cardHtml).join('');
 }
 
 /* ---------------- mood picks ---------------- */
@@ -1542,6 +1540,13 @@ function bindEvents() {
   });
   $('#view-grid-btn').addEventListener('click', () => setViewMode('grid'));
   $('#view-list-btn').addEventListener('click', () => setViewMode('list'));
+  const setHomeView = (mode) => {
+    homeViewMode = mode;
+    try { localStorage.setItem('stacks-home-view', mode); } catch {}
+    renderHome();
+  };
+  $('#home-grid-btn').addEventListener('click', () => setHomeView('grid'));
+  $('#home-list-btn').addEventListener('click', () => setHomeView('list'));
 
   $('#scan-manual').addEventListener('submit', (e) => {
     e.preventDefault();
