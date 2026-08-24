@@ -100,34 +100,53 @@ function blobToB64(blob) {
 }
 
 async function readRemoteCatalog(cfg) {
-  const res = await fetch(fileUrl(cfg, DATA_PATH), { headers: headers(cfg) });
+  const res = await fetch(fileUrl(cfg, DATA_PATH), { headers: headers(cfg), cache: 'no-store' });
   if (res.status === 404) return { data: null, sha: null };
   if (res.status === 401 || res.status === 403) throw new Error('GitHub rejected the token — check its access to the repo.');
   if (!res.ok) throw new Error(`Could not read from GitHub (${res.status}).`);
-  const body = await res.json();
-  return { data: JSON.parse(b64ToText(body.content || '')), sha: body.sha };
+  let body;
+  try { body = await res.json(); } catch { throw new Error('GitHub sent an unreadable response — try syncing again.'); }
+  let text;
+  if (body.encoding === 'none') {
+    // The catalog outgrew the 1 MB the contents API inlines — fetch it raw.
+    const raw = await fetch(fileUrl(cfg, DATA_PATH), {
+      headers: headers(cfg, { Accept: 'application/vnd.github.raw+json' }),
+      cache: 'no-store',
+    });
+    if (!raw.ok) throw new Error(`Could not read from GitHub (${raw.status}).`);
+    text = await raw.text();
+  } else {
+    text = b64ToText(body.content || '');
+  }
+  try {
+    return { data: JSON.parse(text), sha: body.sha };
+  } catch {
+    throw new Error('catalog.json in the sync repo is not readable — if it was edited by hand, delete it there and sync again.');
+  }
 }
 
 async function writeFile(cfg, path, base64, sha, message) {
   const res = await fetch(fileUrl(cfg, path), {
     method: 'PUT',
     headers: headers(cfg),
+    cache: 'no-store',
     body: JSON.stringify({ message, content: base64, ...(sha ? { sha } : {}) }),
   });
   if (res.status === 409 || res.status === 422) return null; // caller retries with a fresh sha
   if (!res.ok) throw new Error(`Could not write to GitHub (${res.status}).`);
-  return (await res.json()).content;
+  try { return (await res.json()).content; } catch { return { sha: null }; } // write landed; sha unknown
 }
 
 async function fetchRemoteSha(cfg, path) {
-  const res = await fetch(fileUrl(cfg, path), { headers: headers(cfg) });
+  const res = await fetch(fileUrl(cfg, path), { headers: headers(cfg), cache: 'no-store' });
   if (!res.ok) return null;
-  return (await res.json()).sha || null;
+  try { return (await res.json()).sha || null; } catch { return null; }
 }
 
 async function readFileBlob(cfg, path) {
   const res = await fetch(fileUrl(cfg, path), {
     headers: headers(cfg, { Accept: 'application/vnd.github.raw+json' }),
+    cache: 'no-store',
   });
   if (!res.ok) return null;
   const blob = await res.blob();
@@ -274,9 +293,9 @@ async function syncCovers(cfg, merged, localMap, onProgress) {
     let pullDirty = false;
     for (const photo of local.photos || []) {
       if (!photo.file) continue;
+      const key = `${id}/${photo.id}`;
+      const mark = pushed[key];
       if (photo.blob) {
-        const key = `${id}/${photo.id}`;
-        const mark = pushed[key];
         if (mark && mark.ts >= (local.updatedAt || '')) continue;
         onProgress('Uploading photos…');
         let sha = (mark && mark.sha) || null;
@@ -289,7 +308,13 @@ async function syncCovers(cfg, merged, localMap, onProgress) {
       } else {
         onProgress('Downloading photos…');
         const blob = await readFileBlob(cfg, photo.file);
-        if (blob) { photo.blob = blob; pullDirty = true; }
+        if (blob) {
+          photo.blob = blob;
+          pullDirty = true;
+          // A photo that just came down is already in the repo — mark it so
+          // the next sync doesn't try to push it back up.
+          pushed[key] = { sha: null, ts: local.updatedAt || new Date().toISOString() };
+        }
       }
     }
     if (pullDirty) {

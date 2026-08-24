@@ -27,6 +27,9 @@ let detailSelectedPhoto = null; // photo id highlighted on the detail page
 const photoUrls = new Map(); // photo id (or item id, legacy) -> object URL
 
 let pendingReload = false; // a new app version is ready; apply when safe
+
+// Prefilled in the sync setup so a new device only needs the token pasted.
+const DEFAULT_SYNC_REPO = 'timeads/stacks-data';
 let viewMode = 'grid'; // library layout: 'grid' | 'list'
 try { viewMode = localStorage.getItem('stacks-view') === 'list' ? 'list' : 'grid'; } catch {}
 
@@ -1224,11 +1227,11 @@ function renderSettings() {
       <ol class="setup-steps">
         <li>Create a <strong>private repo</strong> on GitHub, e.g. <code>stacks-data</code> (empty is fine).</li>
         <li>Create a <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">fine-grained access token</a>: choose <em>Only select repositories</em> → that repo, and under Repository permissions set <strong>Contents</strong> to <strong>Read and write</strong>.</li>
-        <li>Paste both below. On your other device, install the app and paste the same two values.</li>
+        <li>Paste the token below. On your other device, install the app and paste the same token.</li>
       </ol>
       <label class="field">
         <span class="field-label">Repository <em>owner/name</em></span>
-        <input id="sync-repo-input" type="text" autocomplete="off" placeholder="yourname/stacks-data">
+        <input id="sync-repo-input" type="text" autocomplete="off" placeholder="yourname/stacks-data" value="${esc(DEFAULT_SYNC_REPO)}">
       </label>
       <label class="field">
         <span class="field-label">Access token</span>
