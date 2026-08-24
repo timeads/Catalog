@@ -4,6 +4,7 @@
 // so they propagate instead of resurrecting. Tokens stay in this browser.
 
 import { getAllItems, putItem, deleteItem, migrateItem } from './db.js';
+import { getBookcasesBundle, adoptBookcasesBundle } from './locations.js';
 
 const CFG_KEY = 'stacks-sync-config';
 const COVERS_KEY = 'stacks-sync-covers'; // {itemId: {sha, ts}} pushed from this device
@@ -229,6 +230,9 @@ export async function syncNow(onProgress = () => {}) {
         if (!merged.has(item.id)) { await deleteItem(item.id); applied++; }
       }
 
+      // Bookcase list: one bundle, newest edit wins.
+      if (adoptBookcasesBundle(remote?.bookcases)) applied++;
+
       // Push the merged catalog if it differs from what the remote had.
       const payload = {
         app: 'stacks',
@@ -236,9 +240,10 @@ export async function syncNow(onProgress = () => {}) {
         updatedAt: new Date().toISOString(),
         items: [...merged.values()].map(serialize),
         deleted: tombs,
+        bookcases: getBookcasesBundle(),
       };
-      const remoteComparable = JSON.stringify({ items: (remote?.items || []), deleted: remoteTombs });
-      const mergedComparable = JSON.stringify({ items: payload.items, deleted: payload.deleted });
+      const remoteComparable = JSON.stringify({ items: (remote?.items || []), deleted: remoteTombs, bookcases: remote?.bookcases || { updatedAt: '', list: [] } });
+      const mergedComparable = JSON.stringify({ items: payload.items, deleted: payload.deleted, bookcases: payload.bookcases });
       let pushed = false;
       if (remoteComparable !== mergedComparable) {
         onProgress('Uploading catalog…');

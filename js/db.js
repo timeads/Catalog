@@ -65,6 +65,8 @@ export function newItem(kind) {
     notes: '',
     summary: '', // records: a sentence or two; books: a fuller "about" paragraph
     pages: '', // books: page count, when the databases know it
+    bookcaseId: '', // physical location: a bookcase defined in Settings
+    shelf: '', // shelf number on that bookcase
     tracks: [], // records: [{no, title, ms}] from MusicBrainz
     mbid: '', // MusicBrainz release id, when known
     discogsId: '', // Discogs release id, once matched

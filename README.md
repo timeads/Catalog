@@ -35,6 +35,10 @@ own.
 - **Hear it**: every track row on a record's page has a play button — a
   30-second preview found via the iTunes Search API (previews are of the
   digital release; pre-digital rarities may have none).
+- **Physical locations**: define your bookcases in Settings (name + number
+  of shelves), then give every item a bookcase and shelf on its form. The
+  location shows on the item page, is searchable ("living room" finds
+  everything on that case), syncs between devices, and exports in the CSV.
 - **Search & organize**: instant accent-insensitive full-text search across
   every field, kind filters, free-form shelves/tags, grid or list layouts,
   and sorting.

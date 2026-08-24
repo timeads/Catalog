@@ -305,6 +305,16 @@
           </datalist>
         </label>
       </div>
+      <div class="field-grid">
+        <label class="field">
+          <span class="field-label">Bookcase</span>
+          <select name="bookcaseId" id="form-bookcase"></select>
+        </label>
+        <label class="field">
+          <span class="field-label">Shelf</span>
+          <select name="shelf" id="form-shelf"></select>
+        </label>
+      </div>
       <label class="field">
         <span class="field-label">Summary <em>a sentence or two</em></span>
         <textarea name="summary" rows="2"></textarea>
@@ -345,6 +355,9 @@
   <!-- ============ Settings ============ -->
   <section id="view-settings" class="view" hidden>
     <h1 class="page-title">Settings</h1>
+
+    <h2 class="settings-heading">Locations</h2>
+    <div id="locations-panel" class="panel"></div>
 
     <h2 class="settings-heading">Sync between devices</h2>
     <div id="sync-panel" class="panel"></div>

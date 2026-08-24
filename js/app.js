@@ -8,6 +8,7 @@ import {
   isLockEnabled, unlock, enableLock, disableLock, changePassphrase,
   tryRestoreSession, resealIfLocked, resetDevice,
 } from './lock.js';
+import { getBookcases, saveBookcases, newBookcase, locationLabel, getBookcasesBundle, adoptBookcasesBundle } from './locations.js';
 
 /* ---------------- state ---------------- */
 
@@ -262,7 +263,8 @@ function visibleItems() {
     if (filterTag && !it.tags.includes(filterTag)) return false;
     if (terms.length) {
       const hay = fold([it.title, it.creator, it.publisher, it.genre, it.year,
-        it.format, it.notes, it.summary, it.barcode, ...(it.tags || [])].join(' '));
+        it.format, it.notes, it.summary, it.barcode, locationLabel(it),
+        ...(it.tags || [])].join(' '));
       if (!terms.every((t) => hay.includes(t))) return false;
     }
     return true;
@@ -510,8 +512,38 @@ function renderForm() {
     form.elements[name].value = draft[name] || '';
   }
   form.elements.tags.value = (draft.tags || []).join(', ');
+  renderLocationSelects(draft.bookcaseId, draft.shelf);
   renderFormCover();
   if (!isEdit && !draft.title) form.elements.title.focus();
+}
+
+// Bookcase + shelf selects: shelf options follow the chosen bookcase.
+function renderLocationSelects(bookcaseId, shelf) {
+  const cases = getBookcases();
+  const bcSel = $('#form-bookcase');
+  bcSel.innerHTML = `<option value="">—</option>${cases.map((b) =>
+    `<option value="${esc(b.id)}"${b.id === bookcaseId ? ' selected' : ''}>${esc(b.name)}</option>`).join('')}`;
+  if (!cases.length) {
+    bcSel.innerHTML = '<option value="">Add bookcases in Settings</option>';
+  }
+  renderShelfSelect(shelf);
+}
+
+function renderShelfSelect(shelf) {
+  const cases = getBookcases();
+  const bc = cases.find((b) => b.id === $('#form-bookcase').value);
+  const shelfSel = $('#form-shelf');
+  if (!bc) {
+    shelfSel.innerHTML = '<option value="">—</option>';
+    shelfSel.disabled = true;
+    return;
+  }
+  shelfSel.disabled = false;
+  const options = ['<option value="">—</option>'];
+  for (let i = 1; i <= bc.shelves; i++) {
+    options.push(`<option value="${i}"${String(i) === String(shelf) ? ' selected' : ''}>Shelf ${i}</option>`);
+  }
+  shelfSel.innerHTML = options.join('');
 }
 
 function renderFormCover() {
@@ -652,6 +684,8 @@ async function saveForm(ev) {
   for (const name of ['creator', 'year', 'format', 'publisher', 'genre', 'barcode', 'condition', 'summary', 'notes', 'pages']) {
     draft[name] = form.elements[name].value.trim();
   }
+  draft.bookcaseId = form.elements.bookcaseId.value;
+  draft.shelf = draft.bookcaseId ? form.elements.shelf.value : '';
   const newValue = form.elements.value.value.trim();
   if (newValue !== (draft.value || '')) {
     draft.valueDate = newValue ? new Date().toISOString() : '';
@@ -804,6 +838,7 @@ function photoImgHtml(photo, item) {
 function renderDetail(item) {
   const meta = [item.year, item.genre, item.format, item.condition].filter(Boolean);
   const rows = [
+    ['Location', locationLabel(item)],
     [item.kind === 'book' ? 'Publisher' : 'Label', item.publisher],
     ['Pages', item.pages],
     ['Barcode', item.barcode, 'mono'],
@@ -1178,6 +1213,7 @@ function renderSettings() {
     });
   }
 
+  renderLocationsPanel();
   renderDiscogsPanel();
   renderVisionPanel();
   renderLockPanel();
@@ -1261,18 +1297,23 @@ async function exportJson() {
       coverData: coverBlob ? await blobToDataUrl(coverBlob) : null,
     });
   }
-  const payload = { app: 'stacks', version: 2, exportedAt: new Date().toISOString(), items: out };
+  const payload = { app: 'stacks', version: 2, exportedAt: new Date().toISOString(), items: out, bookcases: getBookcasesBundle() };
   const stamp = new Date().toISOString().slice(0, 10);
   download(`stacks-backup-${stamp}.json`, new Blob([JSON.stringify(payload)], { type: 'application/json' }));
   toast(`Backed up ${out.length} items.`);
 }
 
 function exportCsv() {
-  const cols = ['kind', 'title', 'creator', 'year', 'format', 'publisher', 'genre', 'condition', 'barcode', 'pages', 'summary', 'value', 'valueDate', 'tags', 'notes', 'createdAt'];
+  const bookcases = getBookcases();
+  const cols = ['kind', 'title', 'creator', 'year', 'format', 'publisher', 'genre', 'condition', 'barcode', 'pages', 'bookcase', 'shelf', 'summary', 'value', 'valueDate', 'tags', 'notes', 'createdAt'];
   const cell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
   const lines = [cols.join(',')];
   for (const it of items) {
-    lines.push(cols.map((c) => cell(c === 'tags' ? it.tags.join('; ') : it[c])).join(','));
+    lines.push(cols.map((c) => {
+      if (c === 'tags') return cell(it.tags.join('; '));
+      if (c === 'bookcase') return cell((bookcases.find((b) => b.id === it.bookcaseId) || {}).name || '');
+      return cell(it[c]);
+    }).join(','));
   }
   const stamp = new Date().toISOString().slice(0, 10);
   download(`stacks-catalog-${stamp}.csv`, new Blob([lines.join('\r\n')], { type: 'text/csv' }));
@@ -1285,6 +1326,7 @@ async function importJson(ev) {
   try {
     const payload = JSON.parse(await file.text());
     if (!payload || !Array.isArray(payload.items)) throw new Error('bad file');
+    adoptBookcasesBundle(payload.bookcases);
     let added = 0;
     let updated = 0;
     for (const raw of payload.items) {
@@ -1378,6 +1420,7 @@ function bindEvents() {
   }));
 
   $$('[data-formkind]').forEach((b) => b.addEventListener('click', () => setFormKind(b.dataset.formkind)));
+  $('#form-bookcase').addEventListener('change', () => renderShelfSelect(''));
   $('#item-form').addEventListener('submit', saveForm);
   $('#form-cancel').addEventListener('click', () => { draft = null; history.back(); });
   $('#cover-file').addEventListener('change', onCoverPicked);
@@ -1427,6 +1470,60 @@ function bindLockScreen() {
     if (!confirm('Reset this device? The local copy of the catalog and its tokens are wiped. Anything synced or backed up is safe and can be restored.')) return;
     if (!confirm('Really reset? This cannot be undone on this device.')) return;
     await resetDevice();
+  });
+}
+
+function renderLocationsPanel() {
+  const panel = $('#locations-panel');
+  const cases = getBookcases();
+  const rows = cases.map((b) => {
+    const count = items.filter((i) => i.bookcaseId === b.id).length;
+    return `
+      <div class="location-row" data-id="${esc(b.id)}">
+        <span class="location-name">${esc(b.name)}</span>
+        <span class="location-meta">${b.shelves} shel${b.shelves === 1 ? 'f' : 'ves'} · ${count} item${count === 1 ? '' : 's'}</span>
+        <button class="clear-link location-remove" type="button">Remove</button>
+      </div>`;
+  }).join('');
+  panel.innerHTML = `
+    ${cases.length ? `<div class="location-list">${rows}</div>`
+      : '<p class="aside-note">Name your bookcases here, then assign every item a bookcase and shelf on its form — so the catalog can tell you exactly where a record or book physically lives.</p>'}
+    <div class="location-add">
+      <input id="bookcase-name" type="text" autocomplete="off" placeholder="Bookcase name — e.g. Living room wall">
+      <input id="bookcase-shelves" type="text" inputmode="numeric" autocomplete="off" placeholder="Shelves" aria-label="Number of shelves">
+      <button id="bookcase-add" class="btn btn-accent" type="button">Add</button>
+    </div>`;
+
+  $('#bookcase-add').addEventListener('click', async () => {
+    const name = $('#bookcase-name').value.trim();
+    const shelves = $('#bookcase-shelves').value.trim();
+    if (!name) { toast('Give the bookcase a name.'); return; }
+    saveBookcases([...cases, newBookcase(name, shelves)]);
+    renderLocationsPanel();
+    toast(`“${name}” added.`);
+    scheduleSync();
+  });
+
+  $$('#locations-panel .location-remove').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const id = btn.closest('.location-row').dataset.id;
+      const bc = cases.find((b) => b.id === id);
+      const affected = items.filter((i) => i.bookcaseId === id);
+      const warning = affected.length
+        ? ` ${affected.length} item${affected.length === 1 ? "'s" : "s'"} location will be cleared.`
+        : '';
+      if (!confirm(`Remove “${bc.name}”?${warning}`)) return;
+      saveBookcases(cases.filter((b) => b.id !== id));
+      for (const item of affected) {
+        item.bookcaseId = '';
+        item.shelf = '';
+        item.updatedAt = new Date().toISOString();
+        await putItem(item);
+      }
+      renderLocationsPanel();
+      toast('Removed.');
+      scheduleSync();
+    });
   });
 }
 
