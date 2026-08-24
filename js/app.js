@@ -1,6 +1,6 @@
 import { getAllItems, putItem, deleteItem, newItem, newPhoto, migrateItem } from './db.js';
-import { lookupBarcode, searchBooks, searchRecords, fetchTracks, findArchivePhotos } from './lookup.js';
-import { getVisionKey, setVisionKey, identifyPhoto } from './identify.js';
+import { lookupBarcode, searchBooks, searchRecords, fetchReleaseDetails, fetchBookDescription, findArchivePhotos } from './lookup.js';
+import { getVisionKey, setVisionKey, identifyPhoto, enrichItem } from './identify.js';
 import { startScanner } from './scanner.js';
 import { getSyncConfig, setSyncConfig, lastSyncedAt, recordTombstone, syncNow } from './sync.js';
 import { getDiscogsToken, setDiscogsToken, parseValue, fmtMoney, marketLinks, discogsStats } from './value.js';
@@ -261,7 +261,7 @@ function visibleItems() {
     if (filterTag && !it.tags.includes(filterTag)) return false;
     if (terms.length) {
       const hay = fold([it.title, it.creator, it.publisher, it.genre, it.year,
-        it.format, it.notes, it.barcode, ...(it.tags || [])].join(' '));
+        it.format, it.notes, it.summary, it.barcode, ...(it.tags || [])].join(' '));
       if (!terms.every((t) => hay.includes(t))) return false;
     }
     return true;
@@ -365,15 +365,64 @@ function openDraftFrom(found) {
   // A record picked from name-search doesn't have its tracklist yet.
   if (found.kind === 'record' && found.mbid && !(found.tracks || []).length) {
     const target = draft;
-    fetchTracks(found.mbid).then((tracks) => {
-      if (tracks && (draft === target || items.some((i) => i.id === target.id))) {
-        target.tracks = tracks;
+    fetchReleaseDetails(found.mbid).then((details) => {
+      if (!details) return;
+      if (draft === target || items.some((i) => i.id === target.id)) {
+        if (details.tracks) target.tracks = details.tracks;
+        if (details.genre && !target.genre) {
+          target.genre = details.genre;
+          if (draft === target && !views.form.hidden && !$('#item-form').elements.genre.value.trim()) {
+            $('#item-form').elements.genre.value = details.genre;
+          }
+        }
         if (items.some((i) => i.id === target.id)) putItem(target);
       }
     });
   }
+  // A book picked from name-search doesn't have its blurb yet.
+  if (found.kind === 'book' && found.barcode && !found.summary) {
+    const target = draft;
+    fetchBookDescription(found.barcode.replace(/[^0-9Xx]/g, '')).then((summary) => {
+      if (summary && !target.summary) {
+        target.summary = summary;
+        if (draft === target && !views.form.hidden && !$('#item-form').elements.summary.value.trim()) {
+          $('#item-form').elements.summary.value = summary;
+        }
+        if (items.some((i) => i.id === target.id)) putItem(target);
+      }
+    });
+  }
+  maybeEnrichDraft(draft);
   toast(`Found “${found.title}” — check the details, then save.`);
   location.hash = '#/new';
+}
+
+// Fill in genre and a short summary from Claude when the databases
+// didn't provide them. Only ever fills blanks — never overwrites what
+// the databases found or the user typed.
+async function maybeEnrichDraft(target) {
+  const key = getVisionKey();
+  if (!key || !target.title || (target.genre && target.summary)) return;
+  let extra = null;
+  try { extra = await enrichItem(target, key); } catch { return; }
+  if (!extra) return;
+  const live = draft === target && !views.form.hidden;
+  const form = $('#item-form');
+  if (extra.genre && !target.genre) {
+    target.genre = extra.genre;
+    if (live && !form.elements.genre.value.trim()) form.elements.genre.value = extra.genre;
+  }
+  if (extra.summary && !target.summary) {
+    target.summary = extra.summary;
+    if (live && !form.elements.summary.value.trim()) form.elements.summary.value = extra.summary;
+  }
+  // If it was saved before the answer arrived, update the stored item too.
+  if (items.some((i) => i.id === target.id)) {
+    migrateItem(target);
+    await putItem(target);
+    if (currentView === 'detail') rerender();
+    scheduleSync();
+  }
 }
 
 /* ---------------- online search ---------------- */
@@ -420,7 +469,7 @@ function renderForm() {
   $('#form-title').textContent = isEdit ? 'Edit item'
     : draft.title ? 'Check & save' : 'New item';
   setFormKind(draft.kind);
-  for (const name of ['title', 'creator', 'year', 'format', 'publisher', 'genre', 'barcode', 'condition', 'notes', 'value']) {
+  for (const name of ['title', 'creator', 'year', 'format', 'publisher', 'genre', 'barcode', 'condition', 'summary', 'notes', 'value']) {
     form.elements[name].value = draft[name] || '';
   }
   form.elements.tags.value = (draft.tags || []).join(', ');
@@ -512,6 +561,8 @@ async function identifyAndFill(target) {
   target.title = id.title;
   target.creator = id.creator;
   target.year = id.year;
+  target.genre = id.genre || '';
+  target.summary = id.summary || '';
   setStatus('Fetching details…');
 
   // Confirm against the open databases and pull the rich details.
@@ -520,11 +571,14 @@ async function identifyAndFill(target) {
     const results = target.kind === 'book' ? await searchBooks(q) : await searchRecords(q);
     const best = results[0];
     if (best && fold(best.title).includes(fold(id.title).slice(0, 12))) {
-      for (const f of ['title', 'creator', 'year', 'format', 'publisher', 'genre', 'mbid']) {
+      for (const f of ['title', 'creator', 'year', 'format', 'publisher', 'mbid']) {
         if (best[f]) target[f] = best[f];
       }
+      if (best.genre && !target.genre) target.genre = best.genre;
       if (target.kind === 'record' && target.mbid) {
-        target.tracks = (await fetchTracks(target.mbid)) || [];
+        const details = await fetchReleaseDetails(target.mbid);
+        target.tracks = (details && details.tracks) || [];
+        if (details && details.genre && !target.genre) target.genre = details.genre;
         // Bring in the archive's images — front and back of the sleeve.
         const images = await findArchivePhotos(target).catch(() => []);
         for (const img of images) {
@@ -558,7 +612,7 @@ async function saveForm(ev) {
     toast('A title is all it needs — add one to save.');
     return;
   }
-  for (const name of ['creator', 'year', 'format', 'publisher', 'genre', 'barcode', 'condition', 'notes']) {
+  for (const name of ['creator', 'year', 'format', 'publisher', 'genre', 'barcode', 'condition', 'summary', 'notes']) {
     draft[name] = form.elements[name].value.trim();
   }
   const newValue = form.elements.value.value.trim();
@@ -579,6 +633,7 @@ async function saveForm(ev) {
   toast(`“${saved.title}” is on the shelf.`);
   location.hash = `#/item/${saved.id}`;
   cachePhotoBlobs(saved);
+  maybeEnrichDraft(saved);
   scheduleSync();
 }
 
@@ -792,6 +847,7 @@ function renderDetail(item) {
         <p class="detail-creator">${esc(item.creator)}</p>
         ${meta.length ? `<div class="detail-meta">
           ${meta.map((m) => `<span class="meta-chip">${esc(m)}</span>`).join('')}</div>` : ''}
+        ${item.summary ? `<p class="detail-summary">${esc(item.summary)}</p>` : ''}
         <div class="detail-actions">
           <a class="btn btn-accent" href="#/edit/${item.id}">Edit</a>
           <button id="detail-delete" class="btn btn-danger" type="button">Remove</button>
@@ -1174,7 +1230,7 @@ async function exportJson() {
 }
 
 function exportCsv() {
-  const cols = ['kind', 'title', 'creator', 'year', 'format', 'publisher', 'genre', 'condition', 'barcode', 'value', 'valueDate', 'tags', 'notes', 'createdAt'];
+  const cols = ['kind', 'title', 'creator', 'year', 'format', 'publisher', 'genre', 'condition', 'barcode', 'summary', 'value', 'valueDate', 'tags', 'notes', 'createdAt'];
   const cell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
   const lines = [cols.join(',')];
   for (const it of items) {

@@ -996,6 +996,14 @@ input:focus, textarea:focus, select:focus {
   font-weight: 500;
 }
 
+.detail-summary {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--ink-2);
+  max-width: 58ch;
+  margin: 0 0 16px;
+}
+
 .detail-actions { display: flex; gap: 10px; margin-bottom: 20px; }
 
 .detail-section-head {

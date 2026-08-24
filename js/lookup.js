@@ -110,20 +110,39 @@ function fromMusicBrainzRelease(r, barcode) {
   };
 }
 
-// Track titles and durations for a MusicBrainz release.
-// Returns [{no, title, ms}] or null.
-export async function fetchTracks(mbid) {
+// Track titles/durations and community genres for a MusicBrainz release.
+// Returns {tracks: [{no, title, ms}]|null, genre: ''} or null.
+export async function fetchReleaseDetails(mbid) {
   if (!mbid) return null;
   const data = await getJson(
-    `https://musicbrainz.org/ws/2/release/${mbid}?inc=recordings&fmt=json`
+    `https://musicbrainz.org/ws/2/release/${mbid}?inc=recordings+genres&fmt=json`
   );
-  if (!data || !data.media) return null;
-  const tracks = data.media.flatMap((m) => (m.tracks || []).map((t) => ({
+  if (!data) return null;
+  const tracks = (data.media || []).flatMap((m) => (m.tracks || []).map((t) => ({
     no: t.number || String(t.position || ''),
     title: t.title || '',
     ms: t.length || 0,
   })));
-  return tracks.length ? tracks : null;
+  const genre = (data.genres || [])
+    .sort((a, b) => (b.count || 0) - (a.count || 0))
+    .slice(0, 2)
+    .map((g) => (g.name || '').replace(/\b\w/g, (c) => c.toUpperCase()))
+    .filter(Boolean)
+    .join(', ');
+  return { tracks: tracks.length ? tracks : null, genre };
+}
+
+// The Open Library work description for a book — often a real blurb.
+export async function fetchBookDescription(isbn) {
+  const edition = await getJson(`https://openlibrary.org/isbn/${isbn}.json`);
+  const workKey = edition && edition.works && edition.works[0] && edition.works[0].key;
+  if (!workKey) return '';
+  const work = await getJson(`https://openlibrary.org${workKey}.json`);
+  let d = work && work.description;
+  if (d && typeof d === 'object') d = d.value;
+  if (!d) return '';
+  d = String(d).split('\n')[0].trim();
+  return d.length > 400 ? `${d.slice(0, 397)}…` : d;
 }
 
 async function musicBrainzByBarcode(code) {
@@ -204,13 +223,17 @@ export async function lookupBarcode(rawCode) {
   const code = digitsOnly(rawCode);
   if (!code) return null;
   if (looksLikeIsbn(code)) {
-    return (await openLibraryByIsbn(code)) || (await googleBooks(`isbn:${code}`, code));
+    const book = (await openLibraryByIsbn(code)) || (await googleBooks(`isbn:${code}`, code));
+    if (book && !book.summary) book.summary = await fetchBookDescription(code).catch(() => '');
+    return book;
   }
   // Not an ISBN: almost certainly a record UPC/EAN. Fall back to Google Books
   // in case it's a barcoded book without a 978 prefix.
   const release = await musicBrainzByBarcode(code);
   if (release) {
-    release.tracks = (await fetchTracks(release.mbid)) || [];
+    const details = await fetchReleaseDetails(release.mbid);
+    release.tracks = (details && details.tracks) || [];
+    if (details && details.genre && !release.genre) release.genre = details.genre;
     return release;
   }
   return googleBooks(code, code);

@@ -25,6 +25,12 @@ own.
   cover. **Find in the archives** pulls every image the open databases hold
   for the item: for records that's the Cover Art Archive set (front, back,
   labels, booklets), for books the Open Library edition covers.
+- **Genre & summary, automatically**: every add path fills in the music
+  genre / book categories and a one-two sentence summary — from MusicBrainz
+  community genres and Open Library work descriptions where they exist, and
+  from Claude (with the same API key as photo identification) everywhere
+  else. Both are editable, searchable, shown on the item page, and in the
+  CSV export.
 - **Hear it**: every track row on a record's page has a play button — a
   30-second preview found via the iTunes Search API (previews are of the
   digital release; pre-digital rarities may have none).
