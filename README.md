@@ -131,5 +131,14 @@ vendor/zxing.min.js   vendored @zxing/library UMD bundle (v0.21.3)
 sw.js                 offline cache
 manifest.webmanifest  PWA install metadata
 icons/                app icons + logo
-docs/DESIGN.md        earlier design-system spec (superseded by current UI)
+PRODUCT.md            product truth for design tooling
+DESIGN.md             the design system: tokens + rules (normative)
+.claude/              vendored Impeccable design skill (/impeccable …)
 ```
+
+## Design standards
+
+The UI follows [Impeccable](https://github.com/pbakaus/impeccable), vendored
+under `.claude/` so Claude Code sessions get its `/impeccable` commands and
+design detector. `DESIGN.md` is the normative token source — new colors,
+type sizes, or radii are added there first, then used in CSS.

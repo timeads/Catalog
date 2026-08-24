@@ -20,7 +20,7 @@
   <link rel="apple-touch-icon" href="icons/icon-192.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap">
   <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
@@ -159,7 +159,7 @@
     <div id="recent-rail" class="recent-rail"></div>
     <div id="home-empty" class="empty-state" hidden>
       <p class="empty-title">Your collection starts here</p>
-      <p>Scan a barcode, photograph a cover, or search by name — everything you add is searchable and lives on your device.</p>
+      <p>Scan a barcode, photograph a cover, or search by name. Everything you add is searchable and lives on your device.</p>
       <button class="btn btn-accent" type="button" data-open-sheet>Add your first item</button>
     </div>
   </section>
@@ -210,7 +210,7 @@
     </div>
     <div id="library-noresults" class="empty-state" hidden>
       <p class="empty-title">No matches</p>
-      <p>Nothing fits those filters — try fewer words, or clear the filters.</p>
+      <p>Nothing fits those filters. Try fewer words, or clear the filters.</p>
     </div>
   </section>
 
@@ -248,7 +248,7 @@
     </form>
     <p id="online-status" class="scan-status" role="status"></p>
     <ul id="online-results" class="result-list"></ul>
-    <p class="aside-note">Not listed? <a href="#/new">Start with a blank form</a> — older pressings and printings often predate the databases.</p>
+    <p class="aside-note">Not listed? <a href="#/new">Start with a blank form</a>: older pressings and printings often predate the databases.</p>
   </section>
 
   <!-- ============ Item form ============ -->
@@ -444,7 +444,7 @@
   <div class="sheet-options">
     <a class="sheet-option" href="#/scan" data-close-sheet>
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h1.5v14H3zM6 5h1v14H6zM8.5 5H11v14H8.5zM12.5 5h1v14h-1zM15 5h2v14h-2zM18.5 5h1v14h-1zM21 5h1v14h-1z"/></svg>
-      <span><strong>Scan barcode</strong><small>ISBN or UPC — details fill in automatically</small></span>
+      <span><strong>Scan barcode</strong><small>ISBN or UPC, details fill in automatically</small></span>
     </a>
     <label class="sheet-option" for="photo-file">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3l-1.5 2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-3.5L15 3H9zm3 5.5a5 5 0 1 1 0 10 5 5 0 0 1 0-10zm0 2a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"/></svg>
@@ -453,11 +453,11 @@
     <input id="photo-file" type="file" accept="image/*" capture="environment" hidden>
     <a class="sheet-option" href="#/lookup" data-close-sheet>
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 2a8 8 0 1 0 4.9 14.3l5.4 5.4 1.4-1.4-5.4-5.4A8 8 0 0 0 10 2zm0 2a6 6 0 1 1 0 12 6 6 0 0 1 0-12z"/></svg>
-      <span><strong>Search online</strong><small>By title, artist, or author — for pre-barcode finds</small></span>
+      <span><strong>Search online</strong><small>By title, artist, or author, for pre-barcode finds</small></span>
     </a>
     <a class="sheet-option" href="#/new" data-close-sheet>
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20l1-4L16.5 4.5a2.1 2.1 0 0 1 3 3L8 19l-4 1zm12-13l1 1"/></svg>
-      <span><strong>Type it in</strong><small>Blank form — only a title is required</small></span>
+      <span><strong>Type it in</strong><small>Blank form, only a title is required</small></span>
     </a>
   </div>
 </div>

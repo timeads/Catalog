@@ -1,7 +1,9 @@
 /* Stacks — modern app shell.
-   Warm stone neutrals, one signal-orange accent, Inter throughout with
-   IBM Plex Mono for archival codes. Bottom tab bar + raised add hub on
-   mobile; sidebar app shell on desktop. */
+   Warm stone neutrals, one signal-orange accent, Hanken Grotesk throughout
+   with IBM Plex Mono reserved for archival data (barcodes, durations,
+   prices). Bottom tab bar + raised add hub on mobile; sidebar app shell on
+   desktop. Tokens are documented in DESIGN.md — new sizes/colors go there
+   first. */
 
 :root {
   --bg: #fafaf9;
@@ -22,8 +24,24 @@
   --ok: #16a34a;
   --shadow-1: 0 1px 2px rgba(28, 25, 23, 0.05), 0 4px 12px rgba(28, 25, 23, 0.06);
   --shadow-2: 0 2px 4px rgba(28, 25, 23, 0.06), 0 10px 28px rgba(28, 25, 23, 0.12);
-  --font-ui: "Inter", -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  --camera-well: #121110; /* camera/cover wells stay dark in both themes */
+  --font-ui: "Hanken Grotesk", -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
   --font-mono: "IBM Plex Mono", "SFMono-Regular", Menlo, monospace;
+  /* Type ramp — fixed rem roles, ~1.13 ratio. Decorative cover monograms
+     (.cover-placeholder) scale freely outside the ramp. */
+  --fs-micro: 0.6875rem;   /* 11px — thumb flags, tab labels */
+  --fs-label: 0.78125rem;  /* 12.5px — chips, buttons, field labels */
+  --fs-meta: 0.84375rem;   /* 13.5px — secondary text, notes, rows */
+  --fs-body: 0.9375rem;    /* 15px — body */
+  --fs-lead: 1.0625rem;    /* 17px — emphasized body, section heads */
+  --fs-title: 1.1875rem;   /* 19px — card/panel titles */
+  --fs-heading: 1.5rem;    /* 24px — view headings */
+  --fs-display: 1.75rem;   /* 28px — page titles */
+  --fs-hero: 1.875rem;     /* 30px — stat numerals */
+  --fs-monogram-sm: 1.25rem;  /* cover-placeholder lettering, small tiles */
+  --fs-monogram-md: 2rem;     /* cover-placeholder lettering, cards */
+  --fs-monogram-lg: 3rem;     /* cover-placeholder lettering, detail */
+  --r-xs: 4px;
   --r-sm: 6px;
   --r: 10px;
   --r-lg: 14px;
@@ -83,7 +101,15 @@
 
 [hidden] { display: none !important; }
 
-html { height: 100%; }
+html {
+  height: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* The surfaces the browser draws still belong to the design. */
+::selection { background: var(--accent-soft); color: var(--on-accent-soft); }
+input, textarea, select { caret-color: var(--accent); }
+a { text-underline-offset: 0.2em; }
 
 body {
   margin: 0;
@@ -91,7 +117,7 @@ body {
   background: var(--bg);
   color: var(--ink);
   font-family: var(--font-ui);
-  font-size: 15px;
+  font-size: var(--fs-body);
   line-height: 1.55;
   -webkit-font-smoothing: antialiased;
 }
@@ -155,7 +181,7 @@ main {
 
 .brand-name {
   font-weight: 800;
-  font-size: 19px;
+  font-size: var(--fs-title);
   letter-spacing: -0.02em;
 }
 
@@ -170,7 +196,7 @@ main {
   padding: 9px 12px;
   border-radius: var(--r-sm);
   font-weight: 500;
-  font-size: 14px;
+  font-size: var(--fs-meta);
   text-decoration: none;
   color: var(--ink-2);
 }
@@ -186,20 +212,20 @@ main {
 
 .nav-count {
   margin-left: auto;
-  font-size: 12px;
+  font-size: var(--fs-label);
   font-variant-numeric: tabular-nums;
   color: var(--ink-3);
 }
 
 .side-sync {
   margin-top: auto;
-  font-size: 12.5px;
+  font-size: var(--fs-label);
   color: var(--ink-3);
   padding: 10px 12px;
   border-top: 1px solid var(--border);
 }
 
-.top-sync { font-size: 12px; color: var(--ink-3); }
+.top-sync { font-size: var(--fs-label); color: var(--ink-3); }
 
 .sync-dot {
   display: inline-block;
@@ -217,7 +243,7 @@ main {
 /* ---------- page furniture ---------- */
 
 .page-title {
-  font-size: 28px;
+  font-size: var(--fs-display);
   font-weight: 700;
   letter-spacing: -0.02em;
   line-height: 1.2;
@@ -226,7 +252,7 @@ main {
 }
 
 @media (min-width: 900px) {
-  .page-title { font-size: 32px; margin-top: 26px; }
+  .page-title { font-size: var(--fs-hero); margin-top: 26px; }
 }
 
 .section-head {
@@ -237,14 +263,14 @@ main {
 }
 
 .section-head h2 {
-  font-size: 19px;
+  font-size: var(--fs-title);
   font-weight: 700;
   letter-spacing: -0.01em;
   margin: 0;
 }
 
 .section-link {
-  font-size: 13.5px;
+  font-size: var(--fs-meta);
   font-weight: 500;
   text-decoration: none;
 }
@@ -258,7 +284,7 @@ main {
   padding: 8px 0;
   margin: 8px 0 4px;
   font-weight: 500;
-  font-size: 14px;
+  font-size: var(--fs-meta);
   color: var(--ink-2);
   cursor: pointer;
 }
@@ -267,7 +293,7 @@ main {
 
 .field-label {
   display: block;
-  font-size: 12.5px;
+  font-size: var(--fs-label);
   font-weight: 600;
   color: var(--ink-2);
   margin-bottom: 6px;
@@ -275,7 +301,7 @@ main {
 
 .field-label em { font-style: normal; font-weight: 400; color: var(--ink-3); }
 
-.aside-note { font-size: 13.5px; color: var(--ink-3); max-width: 60ch; }
+.aside-note { font-size: var(--fs-meta); color: var(--ink-3); max-width: 60ch; }
 
 /* ---------- tab bar (mobile) ---------- */
 
@@ -300,7 +326,7 @@ main {
   gap: 2px;
   padding: 6px 2px;
   border-radius: var(--r-sm);
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   font-weight: 500;
   text-decoration: none;
   color: var(--ink-3);
@@ -342,7 +368,7 @@ main {
   border-radius: var(--r);
   padding: 11px 18px;
   font-weight: 600;
-  font-size: 14px;
+  font-size: var(--fs-meta);
   line-height: 1.4;
   text-decoration: none;
   text-align: center;
@@ -412,9 +438,9 @@ input:focus, textarea:focus, select:focus {
 .seg-btn {
   border: none;
   background: transparent;
-  border-radius: calc(var(--r) - 3px);
+  border-radius: var(--r-sm);
   padding: 7px 14px;
-  font-size: 13px;
+  font-size: var(--fs-meta);
   font-weight: 500;
   color: var(--ink-2);
   cursor: pointer;
@@ -433,7 +459,7 @@ input:focus, textarea:focus, select:focus {
   background: var(--surface);
   color: var(--ink-2);
   padding: 5px 12px;
-  font-size: 12.5px;
+  font-size: var(--fs-label);
   font-weight: 500;
   cursor: pointer;
   white-space: nowrap;
@@ -445,7 +471,7 @@ input:focus, textarea:focus, select:focus {
   color: var(--on-accent-soft);
 }
 
-.chip.is-active::after { content: " ✕"; font-size: 10px; }
+.chip.is-active::after { content: " ✕"; font-size: var(--fs-micro); }
 
 .chip .chip-ico {
   width: 11px;
@@ -482,14 +508,14 @@ input:focus, textarea:focus, select:focus {
 .stat-card:hover { border-color: var(--border-strong); }
 
 .stat-num {
-  font-size: 30px;
+  font-size: var(--fs-hero);
   font-weight: 700;
   letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
   line-height: 1.15;
 }
 
-.stat-label { font-size: 12.5px; font-weight: 500; color: var(--ink-3); }
+.stat-label { font-size: var(--fs-label); font-weight: 500; color: var(--ink-3); }
 
 .quick-actions {
   display: grid;
@@ -509,7 +535,7 @@ input:focus, textarea:focus, select:focus {
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
   font-weight: 600;
-  font-size: 14px;
+  font-size: var(--fs-meta);
   text-decoration: none;
   color: var(--ink);
   cursor: pointer;
@@ -561,7 +587,7 @@ input:focus, textarea:focus, select:focus {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 2.2rem;
+  font-size: var(--fs-monogram-md);
   font-weight: 700;
   color: var(--ph-ink, var(--ink-3));
   background: var(--ph-bg, var(--surface-3));
@@ -577,14 +603,14 @@ input:focus, textarea:focus, select:focus {
   color: var(--ink);
   border-radius: 999px;
   padding: 2px 9px;
-  font-size: 11.5px;
+  font-size: var(--fs-label);
   font-weight: 500;
 }
 
 .rail-card .card-title,
 .item-card .card-title {
   font-weight: 600;
-  font-size: 14px;
+  font-size: var(--fs-meta);
   line-height: 1.3;
   margin: 9px 0 1px;
   display: -webkit-box;
@@ -596,7 +622,7 @@ input:focus, textarea:focus, select:focus {
 .rail-card .card-creator,
 .item-card .card-creator {
   color: var(--ink-3);
-  font-size: 12.5px;
+  font-size: var(--fs-label);
   margin: 0;
   white-space: nowrap;
   overflow: hidden;
@@ -620,7 +646,7 @@ input:focus, textarea:focus, select:focus {
   pointer-events: none;
 }
 
-.search-field input { padding-left: 41px; font-size: 15px; }
+.search-field input { padding-left: 41px; font-size: var(--fs-body); }
 
 .filter-row {
   display: flex;
@@ -632,7 +658,7 @@ input:focus, textarea:focus, select:focus {
 
 .filter-end { display: flex; gap: 8px; align-items: center; }
 
-.sort-select { width: auto; padding: 8px 10px; font-size: 13px; }
+.sort-select { width: auto; padding: 8px 10px; font-size: var(--fs-meta); }
 
 .view-toggle {
   display: flex;
@@ -650,7 +676,7 @@ input:focus, textarea:focus, select:focus {
   height: 32px;
   border: none;
   background: transparent;
-  border-radius: calc(var(--r) - 3px);
+  border-radius: var(--r-sm);
   cursor: pointer;
   color: var(--ink-3);
 }
@@ -676,7 +702,7 @@ input:focus, textarea:focus, select:focus {
 }
 
 .library-count {
-  font-size: 12.5px;
+  font-size: var(--fs-label);
   font-variant-numeric: tabular-nums;
   color: var(--ink-3);
   margin: 0;
@@ -686,7 +712,7 @@ input:focus, textarea:focus, select:focus {
   border: none;
   background: none;
   color: var(--accent);
-  font-size: 13px;
+  font-size: var(--fs-meta);
   font-weight: 500;
   cursor: pointer;
   padding: 4px;
@@ -720,7 +746,7 @@ input:focus, textarea:focus, select:focus {
 
 .item-card .card-meta {
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--ink-3);
   margin: 4px 0 0;
 }
@@ -764,14 +790,14 @@ input:focus, textarea:focus, select:focus {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  font-size: 1.2rem;
+  font-size: var(--fs-monogram-sm);
 }
 
 .item-row .row-main { min-width: 0; }
 
 .item-row .row-title {
   font-weight: 600;
-  font-size: 14px;
+  font-size: var(--fs-meta);
   margin: 0;
   white-space: nowrap;
   overflow: hidden;
@@ -780,7 +806,7 @@ input:focus, textarea:focus, select:focus {
 
 .item-row .row-creator {
   color: var(--ink-3);
-  font-size: 12.5px;
+  font-size: var(--fs-label);
   margin: 1px 0 0;
   white-space: nowrap;
   overflow: hidden;
@@ -789,7 +815,7 @@ input:focus, textarea:focus, select:focus {
 
 .item-row .row-meta {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--fs-label);
   font-variant-numeric: tabular-nums;
   color: var(--ink-3);
 }
@@ -801,7 +827,7 @@ input:focus, textarea:focus, select:focus {
 }
 
 .empty-title {
-  font-size: 19px;
+  font-size: var(--fs-title);
   font-weight: 700;
   letter-spacing: -0.01em;
   color: var(--ink);
@@ -820,7 +846,7 @@ input:focus, textarea:focus, select:focus {
   aspect-ratio: 3 / 4;
   border-radius: var(--r-lg);
   overflow: hidden;
-  background: #121110;
+  background: var(--camera-well);
   box-shadow: var(--shadow-1);
 }
 
@@ -867,7 +893,7 @@ input:focus, textarea:focus, select:focus {
 }
 
 .scan-status {
-  font-size: 13.5px;
+  font-size: var(--fs-meta);
   color: var(--ink-3);
   margin: 13px 2px;
   min-height: 1.2em;
@@ -929,12 +955,12 @@ input:focus, textarea:focus, select:focus {
   height: 52px;
   object-fit: cover;
   border-radius: var(--r-sm);
-  font-size: 1.3rem;
+  font-size: var(--fs-monogram-sm);
 }
 
-.result-title { font-weight: 600; font-size: 14px; display: block; }
+.result-title { font-weight: 600; font-size: var(--fs-meta); display: block; }
 
-.result-sub { display: block; font-size: 12.5px; color: var(--ink-3); }
+.result-sub { display: block; font-size: var(--fs-label); color: var(--ink-3); }
 
 /* ---------- item form ---------- */
 
@@ -957,7 +983,7 @@ input:focus, textarea:focus, select:focus {
 
 .cover-preview img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
-.cover-preview .cover-placeholder { position: absolute; inset: 0; font-size: 1.8rem; }
+.cover-preview .cover-placeholder { position: absolute; inset: 0; font-size: var(--fs-monogram-md); }
 
 .cover-actions { display: grid; gap: 8px; justify-items: start; }
 
@@ -985,7 +1011,7 @@ input:focus, textarea:focus, select:focus {
 
 .detail-cover img { width: 100%; display: block; }
 
-.detail-cover .cover-placeholder { aspect-ratio: 1 / 1; font-size: 3rem; }
+.detail-cover .cover-placeholder { aspect-ratio: 1 / 1; font-size: var(--fs-monogram-lg); }
 
 .kind-badge {
   display: inline-block;
@@ -993,7 +1019,7 @@ input:focus, textarea:focus, select:focus {
   background: var(--accent-soft);
   color: var(--on-accent-soft);
   padding: 3px 11px;
-  font-size: 11.5px;
+  font-size: var(--fs-label);
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -1001,7 +1027,7 @@ input:focus, textarea:focus, select:focus {
 }
 
 .detail h1 {
-  font-size: 27px;
+  font-size: var(--fs-display);
   font-weight: 700;
   letter-spacing: -0.02em;
   line-height: 1.2;
@@ -1010,7 +1036,7 @@ input:focus, textarea:focus, select:focus {
 }
 
 .detail-creator {
-  font-size: 16px;
+  font-size: var(--fs-lead);
   font-weight: 500;
   color: var(--ink-2);
   margin: 0 0 12px;
@@ -1028,12 +1054,12 @@ input:focus, textarea:focus, select:focus {
   background: var(--surface-2);
   color: var(--ink-2);
   padding: 4px 12px;
-  font-size: 12.5px;
+  font-size: var(--fs-label);
   font-weight: 500;
 }
 
 .detail-summary {
-  font-size: 14px;
+  font-size: var(--fs-meta);
   line-height: 1.6;
   color: var(--ink-2);
   max-width: 58ch;
@@ -1049,7 +1075,7 @@ input:focus, textarea:focus, select:focus {
   margin: 22px 0 10px;
 }
 
-.detail-section-head h2 { font-size: 16px; font-weight: 700; margin: 0; }
+.detail-section-head h2 { font-size: var(--fs-lead); font-weight: 700; margin: 0; }
 
 .linkish {
   border: none;
@@ -1091,7 +1117,7 @@ input:focus, textarea:focus, select:focus {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  font-size: 1.4rem;
+  font-size: var(--fs-monogram-sm);
 }
 
 .photo-thumb.is-selected {
@@ -1108,7 +1134,7 @@ input:focus, textarea:focus, select:focus {
   color: var(--on-accent);
   border-radius: 4px;
   padding: 1px 6px;
-  font-size: 9.5px;
+  font-size: var(--fs-micro);
   font-weight: 600;
   letter-spacing: 0.03em;
   text-transform: uppercase;
@@ -1133,7 +1159,7 @@ input:focus, textarea:focus, select:focus {
   border: 1.5px dashed var(--border-strong);
   border-radius: var(--r);
   color: var(--ink-3);
-  font-size: 24px;
+  font-size: var(--fs-heading);
   cursor: pointer;
 }
 
@@ -1143,13 +1169,13 @@ input:focus, textarea:focus, select:focus {
 
 .photo-actions { display: flex; gap: 8px; margin: 2px 0 6px; }
 
-.photo-actions .btn { padding: 8px 14px; font-size: 13px; }
+.photo-actions .btn { padding: 8px 14px; font-size: var(--fs-meta); }
 
 /* value panel */
 .value-panel { display: grid; gap: 10px; margin-bottom: 6px; }
 
 .value-live {
-  font-size: 13.5px;
+  font-size: var(--fs-meta);
   font-weight: 500;
   color: var(--ink-2);
   margin: 0;
@@ -1196,7 +1222,7 @@ input:focus, textarea:focus, select:focus {
 }
 
 .archive-pick span {
-  font-size: 11.5px;
+  font-size: var(--fs-label);
   font-weight: 500;
   color: var(--ink-2);
   overflow: hidden;
@@ -1205,7 +1231,7 @@ input:focus, textarea:focus, select:focus {
 }
 
 .detail-section-head .total-time {
-  font-size: 12.5px;
+  font-size: var(--fs-label);
   font-variant-numeric: tabular-nums;
   color: var(--ink-3);
 }
@@ -1226,7 +1252,7 @@ input:focus, textarea:focus, select:focus {
   gap: 10px;
   align-items: center;
   padding: 9px 14px;
-  font-size: 14px;
+  font-size: var(--fs-meta);
 }
 
 .tracklist.has-previews li { grid-template-columns: 30px 42px 1fr auto; padding-left: 8px; }
@@ -1262,13 +1288,13 @@ input:focus, textarea:focus, select:focus {
 
 .tracklist .track-no {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--fs-label);
   color: var(--ink-3);
 }
 
 .tracklist .track-time {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--fs-label);
   font-variant-numeric: tabular-nums;
   color: var(--ink-2);
 }
@@ -1287,13 +1313,13 @@ input:focus, textarea:focus, select:focus {
   grid-template-columns: 110px 1fr;
   gap: 14px;
   padding: 10px 14px;
-  font-size: 14px;
+  font-size: var(--fs-meta);
 }
 
 .detail-fields > div + div { border-top: 1px solid var(--border); }
 
 .detail-fields dt {
-  font-size: 12.5px;
+  font-size: var(--fs-label);
   font-weight: 600;
   color: var(--ink-3);
   padding-top: 2px;
@@ -1301,14 +1327,14 @@ input:focus, textarea:focus, select:focus {
 
 .detail-fields dd { margin: 0; overflow-wrap: anywhere; }
 
-.detail-fields dd.mono { font-family: var(--font-mono); font-size: 13px; }
+.detail-fields dd.mono { font-family: var(--font-mono); font-size: var(--fs-meta); }
 
 .detail-fields .tag-list { display: flex; flex-wrap: wrap; gap: 6px; }
 
 /* ---------- settings ---------- */
 
 .settings-heading {
-  font-size: 16px;
+  font-size: var(--fs-lead);
   font-weight: 700;
   margin: 26px 0 10px;
 }
@@ -1337,10 +1363,10 @@ input:focus, textarea:focus, select:focus {
 
 .location-row + .location-row { border-top: 1px solid var(--border); }
 
-.location-name { font-weight: 600; font-size: 14px; }
+.location-name { font-weight: 600; font-size: var(--fs-meta); }
 
 .location-meta {
-  font-size: 12.5px;
+  font-size: var(--fs-label);
   color: var(--ink-3);
   font-variant-numeric: tabular-nums;
 }
@@ -1359,14 +1385,14 @@ input:focus, textarea:focus, select:focus {
   flex-wrap: wrap;
 }
 
-.sync-repo { font-family: var(--font-mono); font-size: 13px; }
+.sync-repo { font-family: var(--font-mono); font-size: var(--fs-meta); }
 
-.sync-note { font-size: 13px; color: var(--ink-3); }
+.sync-note { font-size: var(--fs-meta); color: var(--ink-3); }
 
 .setup-steps {
   margin: 0;
   padding-left: 20px;
-  font-size: 13.5px;
+  font-size: var(--fs-meta);
   color: var(--ink-2);
   display: grid;
   gap: 6px;
@@ -1378,7 +1404,7 @@ input:focus, textarea:focus, select:focus {
   display: flex;
   gap: 20px;
   margin: 20px 2px;
-  font-size: 13px;
+  font-size: var(--fs-meta);
   color: var(--ink-3);
   font-variant-numeric: tabular-nums;
 }
@@ -1439,13 +1465,13 @@ input:focus, textarea:focus, select:focus {
 .sheet-handle {
   width: 38px;
   height: 4px;
-  border-radius: 2px;
+  border-radius: 999px;
   background: var(--border-strong);
   margin: 2px auto 12px;
 }
 
 .sheet-title {
-  font-size: 17px;
+  font-size: var(--fs-lead);
   font-weight: 700;
   letter-spacing: -0.01em;
   margin: 0 0 12px;
@@ -1476,9 +1502,9 @@ input:focus, textarea:focus, select:focus {
   fill: var(--on-accent-soft);
 }
 
-.sheet-option strong { display: block; font-size: 14.5px; font-weight: 600; }
+.sheet-option strong { display: block; font-size: var(--fs-body); font-weight: 600; }
 
-.sheet-option small { display: block; font-size: 12.5px; color: var(--ink-3); }
+.sheet-option small { display: block; font-size: var(--fs-label); color: var(--ink-3); }
 
 /* ---------- app lock ---------- */
 
@@ -1503,17 +1529,17 @@ input:focus, textarea:focus, select:focus {
 .lock-mark { width: 56px; height: 72px; color: var(--ink); }
 
 .lock-card h1 {
-  font-size: 24px;
+  font-size: var(--fs-heading);
   font-weight: 800;
   letter-spacing: -0.02em;
   margin: 0;
 }
 
-.lock-sub { color: var(--ink-2); margin: 0 0 6px; font-size: 14px; }
+.lock-sub { color: var(--ink-2); margin: 0 0 6px; font-size: var(--fs-meta); }
 
 .lock-card form { display: grid; gap: 10px; width: 100%; }
 
-.lock-error { color: var(--danger); font-size: 13px; margin: 0; }
+.lock-error { color: var(--danger); font-size: var(--fs-meta); margin: 0; }
 
 body.is-locked .shell,
 body.is-locked .tabbar,
@@ -1585,7 +1611,7 @@ body.is-locked .toast { display: none !important; }
   color: var(--bg);
   border-radius: var(--r);
   padding: 10px 17px;
-  font-size: 13.5px;
+  font-size: var(--fs-meta);
   font-weight: 500;
   box-shadow: var(--shadow-2);
   z-index: 50;
