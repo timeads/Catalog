@@ -32,8 +32,11 @@
   --sidebar-w: 232px;
 }
 
+/* Dark tokens apply when the device prefers dark (unless the user forced
+   light in Settings), or when the user forced dark. Keep both blocks in
+   step — same tokens, two selectors. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #0f0e0d;
     --surface: #1a1917;
     --surface-2: #232220;
@@ -53,6 +56,27 @@
     --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.5), 0 4px 14px rgba(0, 0, 0, 0.4);
     --shadow-2: 0 2px 4px rgba(0, 0, 0, 0.55), 0 12px 32px rgba(0, 0, 0, 0.5);
   }
+}
+
+:root[data-theme="dark"] {
+  --bg: #0f0e0d;
+  --surface: #1a1917;
+  --surface-2: #232220;
+  --surface-3: #2c2a28;
+  --border: #2c2a28;
+  --border-strong: #3d3a37;
+  --ink: #f5f5f4;
+  --ink-2: #bab5b0;
+  --ink-3: #8d8880;
+  --accent: #f97316;
+  --accent-strong: #fb923c;
+  --on-accent: #1c1210;
+  --accent-soft: #3b1d0d;
+  --on-accent-soft: #fdba74;
+  --danger: #f87171;
+  --ok: #4ade80;
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.5), 0 4px 14px rgba(0, 0, 0, 0.4);
+  --shadow-2: 0 2px 4px rgba(0, 0, 0, 0.55), 0 12px 32px rgba(0, 0, 0, 0.5);
 }
 
 * { box-sizing: border-box; }

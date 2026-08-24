@@ -1709,7 +1709,42 @@ async function startApp() {
   if (getSyncConfig() && navigator.onLine !== false) runSync('startup');
 }
 
+/* ---------------- appearance ---------------- */
+
+const THEME_KEY = 'stacks-theme';
+const THEME_BG = { light: '#fafaf9', dark: '#0f0e0d' };
+
+function getTheme() {
+  try {
+    const t = localStorage.getItem(THEME_KEY);
+    return t === 'light' || t === 'dark' ? t : 'system';
+  } catch { return 'system'; }
+}
+
+function applyTheme(theme) {
+  const root = document.documentElement;
+  if (theme === 'light' || theme === 'dark') root.dataset.theme = theme;
+  else delete root.dataset.theme;
+  // Keep the browser-chrome color matching: forced themes pin both
+  // theme-color metas; System restores their per-scheme defaults.
+  $$('meta[name="theme-color"]').forEach((m) => {
+    const scheme = theme === 'system' ? (m.media.includes('dark') ? 'dark' : 'light') : theme;
+    m.content = THEME_BG[scheme];
+  });
+  $$('[data-theme-opt]').forEach((b) => b.classList.toggle('is-active', b.dataset.themeOpt === theme));
+}
+
+function setTheme(theme) {
+  try {
+    if (theme === 'system') localStorage.removeItem(THEME_KEY);
+    else localStorage.setItem(THEME_KEY, theme);
+  } catch {}
+  applyTheme(theme);
+}
+
 async function main() {
+  applyTheme(getTheme());
+  $$('[data-theme-opt]').forEach((b) => b.addEventListener('click', () => setTheme(b.dataset.themeOpt)));
   bindLockScreen();
   if (isLockEnabled() && !(await tryRestoreSession())) {
     document.body.classList.add('is-locked');

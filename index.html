@@ -7,6 +7,14 @@
   <meta name="description" content="A personal catalog for your record and book collection. Scan barcodes, search, organize, and sync between devices.">
   <meta name="theme-color" content="#fafaf9" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#0f0e0d" media="(prefers-color-scheme: dark)">
+  <script>
+    // Apply a forced theme before first paint so the page never flashes
+    // the wrong scheme. The full logic lives in js/app.js.
+    try {
+      var t = localStorage.getItem('stacks-theme');
+      if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+    } catch (e) {}
+  </script>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
@@ -363,6 +371,16 @@
   <!-- ============ Settings ============ -->
   <section id="view-settings" class="view" hidden>
     <h1 class="page-title">Settings</h1>
+
+    <h2 class="settings-heading">Appearance</h2>
+    <div class="panel">
+      <div class="kind-filter" role="group" aria-label="Theme">
+        <button type="button" class="seg-btn" data-theme-opt="system">System</button>
+        <button type="button" class="seg-btn" data-theme-opt="light">Light</button>
+        <button type="button" class="seg-btn" data-theme-opt="dark">Dark</button>
+      </div>
+      <p class="aside-note">System follows this device's own light/dark setting — that's why the phone and desktop can look different. Pick Light or Dark to fix it on this device.</p>
+    </div>
 
     <h2 class="settings-heading">Locations</h2>
     <div id="locations-panel" class="panel"></div>
