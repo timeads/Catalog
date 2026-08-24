@@ -150,6 +150,10 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 4h2v7h7v2h-7v7h-2v-7H4v-2h7z"/></svg>
         Add item
       </button>
+      <a class="action-tile tile-wide" href="#/picks">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l1.9 5.6L19.5 9l-5.6 1.9L12 16.5l-1.9-5.6L4.5 9l5.6-1.4zM19 14l1 3 3 1-3 1-1 3-1-3-3-1 3-1zM5 15l.8 2.2L8 18l-2.2.8L5 21l-.8-2.2L2 18l2.2-.8z"/></svg>
+        Pull a stack for the mood
+      </a>
     </div>
 
     <div class="section-head">
@@ -161,6 +165,30 @@
       <p class="empty-title">Your collection starts here</p>
       <p>Scan a barcode, photograph a cover, or search by name. Everything you add is searchable and lives on your device.</p>
       <button class="btn btn-accent" type="button" data-open-sheet>Add your first item</button>
+    </div>
+  </section>
+
+  <!-- ============ Mood picks ============ -->
+  <section id="view-picks" class="view" hidden>
+    <h1 class="page-title">Pull a stack</h1>
+    <p class="aside-note">Name the mood and get a stack pulled from your own shelves: an ordered record playlist for the evening, or a pile of books to choose from.</p>
+    <form id="mood-form" class="mood-form">
+      <div class="kind-filter" role="group" aria-label="Records or books">
+        <button type="button" class="seg-btn is-active" data-moodkind="record">Records</button>
+        <button type="button" class="seg-btn" data-moodkind="book">Books</button>
+      </div>
+      <div class="mood-bar">
+        <input id="mood-input" type="text" autocomplete="off"
+               placeholder="What's the mood? e.g. late-night dinner party">
+        <button class="btn btn-accent" type="submit">Pull a stack</button>
+      </div>
+    </form>
+    <p id="mood-setup" class="aside-note" hidden>Mood picks think with your Claude API key. Add one under <a href="#/settings">Settings → Photo identification</a> and this screen comes alive.</p>
+    <p id="mood-status" class="scan-status" hidden></p>
+    <div id="mood-results" hidden>
+      <div class="section-head"><h2 id="mood-title"></h2></div>
+      <p id="mood-note" class="aside-note"></p>
+      <ol id="mood-list" class="mood-list"></ol>
     </div>
   </section>
 

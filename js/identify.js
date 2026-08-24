@@ -108,6 +108,71 @@ export async function identifyPhoto(blob, key) {
   };
 }
 
+// Mood picks: given the user's own collection and a mood, choose and order
+// a stack — a listening playlist for records, a reading stack for books.
+// Only the catalog's text fields leave the device; costs a fraction of a
+// cent per ask on the user's key.
+export async function recommendPicks(collection, kind, mood, key) {
+  const clip = (s, n) => String(s || '').replace(/\s+/g, ' ').trim().slice(0, n);
+  const digest = collection.slice(0, 400).map((i) =>
+    `${i.id} | ${clip(i.title, 70)} | ${clip(i.creator, 45)} | ${clip(i.year, 8)} | ${clip(i.genre, 45)} | ${clip((i.tags || []).join(', '), 45)} | ${clip(i.summary, 140)}`
+  ).join('\n');
+  const noun = kind === 'book' ? 'reading stack' : 'playlist';
+  const ordering = kind === 'book'
+    ? 'order picks from most to least fitting'
+    : 'order picks as a listening arc (set the mood first, peak in the middle, land gently)';
+  const prompt = `Choosing from someone's own ${kind} collection for a mood. Pick only from this list.
+Mood: "${clip(mood, 200)}"
+Collection (id | title | creator | year | genre | shelves | about):
+${digest}
+
+Respond with ONLY a JSON object, no other text:
+{"title": "a short evocative name for this ${noun}", "note": "one sentence on the arc and why it fits the mood", "picks": [{"id": "...", "why": "one short concrete sentence for this pick"}]}
+Rules: ids must come from the list verbatim; pick 5-8 (fewer when few genuinely fit); ${ordering}; if nothing fits, return an empty picks array with a kind note.`;
+
+  let res;
+  try {
+    res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': key,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      },
+      body: JSON.stringify({
+        model: 'claude-opus-5',
+        max_tokens: 1000,
+        output_config: { effort: 'low' },
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    });
+  } catch {
+    throw new Error("Couldn't reach the Claude API — check your connection.");
+  }
+  if (!res.ok) {
+    let apiMessage = '';
+    try { apiMessage = (await res.json()).error.message || ''; } catch {}
+    if (res.status === 401) throw new Error('Claude rejected the API key — check it in Settings.');
+    if (res.status === 429) throw new Error('Claude rate limit — try again in a moment.');
+    throw new Error(apiMessage ? `Claude API: ${apiMessage}` : `Couldn't build the ${noun} (${res.status}).`);
+  }
+  const body = await res.json();
+  if (body.stop_reason === 'refusal') throw new Error('Claude declined this request.');
+  const text = (body.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error("Couldn't read the picks.");
+  const out = JSON.parse(match[0]);
+  const known = new Set(collection.map((i) => i.id));
+  return {
+    title: String(out.title || '').trim(),
+    note: String(out.note || '').trim(),
+    picks: (Array.isArray(out.picks) ? out.picks : [])
+      .filter((p) => p && known.has(p.id))
+      .map((p) => ({ id: p.id, why: String(p.why || '').trim() })),
+  };
+}
+
 // Text-only enrichment for items added by scan, search, or typing:
 // genre/categories plus a short factual summary. Returns {genre, summary};
 // empty strings when the item isn't recognized.

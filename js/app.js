@@ -1,6 +1,6 @@
 import { getAllItems, putItem, deleteItem, newItem, newPhoto, migrateItem } from './db.js';
 import { lookupBarcode, searchBooks, searchRecords, fetchReleaseDetails, fetchBookDescription, findArchivePhotos } from './lookup.js';
-import { getVisionKey, setVisionKey, identifyPhoto, enrichItem } from './identify.js';
+import { getVisionKey, setVisionKey, identifyPhoto, enrichItem, recommendPicks } from './identify.js';
 import { startScanner } from './scanner.js';
 import { getSyncConfig, setSyncConfig, lastSyncedAt, recordTombstone, syncNow, markTokenUpdated } from './sync.js';
 import { getDiscogsToken, setDiscogsToken, parseValue, fmtMoney, marketLinks, discogsStats } from './value.js';
@@ -120,6 +120,7 @@ function toast(msg) {
 
 const views = {
   home: $('#view-home'),
+  picks: $('#view-picks'),
   library: $('#view-library'),
   scan: $('#view-scan'),
   lookup: $('#view-lookup'),
@@ -144,6 +145,7 @@ function route() {
 
   let view = 'home';
   if (path === 'library') view = 'library';
+  else if (path === 'picks') view = 'picks';
   else if (path === 'scan') view = 'scan';
   else if (path === 'lookup') view = 'lookup';
   else if (path === 'new' || path === 'edit') view = 'form';
@@ -167,6 +169,7 @@ function route() {
     renderDetail(item);
   }
   if (view === 'home') renderHome();
+  if (view === 'picks') renderPicks();
   if (view === 'library') {
     if (arg === 'book' || arg === 'record') {
       filterKind = arg;
@@ -188,7 +191,7 @@ function route() {
   currentView = view;
   views[view].hidden = false;
   const tab =
-    view === 'home' ? 'home'
+    view === 'home' || view === 'picks' ? 'home'
     : view === 'library' || view === 'detail' ? 'library'
     : view === 'scan' ? 'scan'
     : view === 'settings' ? 'settings' : '';
@@ -264,6 +267,73 @@ function renderHome() {
       <p class="card-title">${esc(it.title)}</p>
       <p class="card-creator">${esc(it.creator)}</p>
     </a>`).join('');
+}
+
+/* ---------------- mood picks ---------------- */
+
+const moodState = { kind: 'record', mood: '', result: null };
+
+function renderPicks() {
+  const hasKey = !!getVisionKey();
+  $('#mood-setup').hidden = hasKey;
+  $('#mood-form').hidden = !hasKey;
+  $('#mood-input').value = moodState.mood;
+  $$('[data-moodkind]').forEach((b) => b.classList.toggle('is-active', b.dataset.moodkind === moodState.kind));
+  renderMoodResult();
+}
+
+function renderMoodResult() {
+  const box = $('#mood-results');
+  const r = moodState.result;
+  if (!r) { box.hidden = true; return; }
+  box.hidden = false;
+  $('#mood-title').textContent = r.title || (moodState.kind === 'book' ? 'A reading stack' : 'A playlist');
+  $('#mood-note').textContent = r.note || '';
+  $('#mood-list').innerHTML = r.picks.map((p) => {
+    const it = items.find((i) => i.id === p.id);
+    if (!it) return '';
+    return `
+      <li class="mood-item">
+        <a href="#/item/${it.id}">
+          <span class="mood-cover">${coverHtml(it)}</span>
+          <span class="mood-main">
+            <span class="mood-item-title">${esc(it.title)}</span>
+            <span class="mood-item-creator">${esc(it.creator)}</span>
+            ${p.why ? `<span class="mood-why">${esc(p.why)}</span>` : ''}
+          </span>
+        </a>
+      </li>`;
+  }).join('') || '';
+  if (!r.picks.length) {
+    $('#mood-note').textContent = r.note || 'Nothing on the shelves quite fits that mood. Try wording it differently.';
+  }
+}
+
+async function runMoodPicks() {
+  const mood = $('#mood-input').value.trim();
+  if (!mood) { toast('Name the mood first.'); return; }
+  const pool = items.filter((i) => i.kind === moodState.kind);
+  const status = $('#mood-status');
+  if (!pool.length) {
+    status.hidden = false;
+    status.textContent = `No ${moodState.kind}s in the catalog yet.`;
+    return;
+  }
+  moodState.mood = mood;
+  moodState.result = null;
+  renderMoodResult();
+  status.hidden = false;
+  status.textContent = 'Reading your shelves…';
+  try {
+    const result = await recommendPicks(pool, moodState.kind, mood, getVisionKey());
+    // Ignore a stale answer if the user asked again meanwhile.
+    if ($('#mood-input').value.trim() !== mood) return;
+    moodState.result = result;
+    status.hidden = true;
+    renderMoodResult();
+  } catch (err) {
+    status.textContent = err && err.message ? err.message : 'Something went wrong. Try again.';
+  }
 }
 
 /* ---------------- library ---------------- */
@@ -1478,6 +1548,14 @@ function bindEvents() {
     const code = $('#scan-code').value.trim();
     if (code) onBarcode(code);
   });
+
+  $('#mood-form').addEventListener('submit', (e) => { e.preventDefault(); runMoodPicks(); });
+  $$('[data-moodkind]').forEach((b) => b.addEventListener('click', () => {
+    moodState.kind = b.dataset.moodkind;
+    moodState.result = null;
+    $$('[data-moodkind]').forEach((x) => x.classList.toggle('is-active', x === b));
+    renderMoodResult();
+  }));
 
   $('#online-form').addEventListener('submit', runOnlineSearch);
   $$('[data-searchkind]').forEach((b) => b.addEventListener('click', () => {
