@@ -304,10 +304,16 @@
         <span class="field-label">Summary <em>a sentence or two</em></span>
         <textarea name="summary" rows="2"></textarea>
       </label>
-      <label class="field">
-        <span class="field-label">Estimated value <em>USD, optional</em></span>
-        <input name="value" type="text" inputmode="decimal" autocomplete="off" placeholder="120">
-      </label>
+      <div class="field-grid">
+        <label class="field">
+          <span class="field-label">Estimated value <em>USD</em></span>
+          <input name="value" type="text" inputmode="decimal" autocomplete="off" placeholder="120">
+        </label>
+        <label class="field">
+          <span class="field-label">Pages</span>
+          <input name="pages" type="text" inputmode="numeric" autocomplete="off">
+        </label>
+      </div>
       <label class="field">
         <span class="field-label">Shelves &amp; tags <em>comma-separated</em></span>
         <input name="tags" type="text" autocomplete="off" placeholder="jazz, first pressings, to lend">

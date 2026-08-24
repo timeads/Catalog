@@ -26,11 +26,12 @@ own.
   for the item: for records that's the Cover Art Archive set (front, back,
   labels, booklets), for books the Open Library edition covers.
 - **Genre & summary, automatically**: every add path fills in the music
-  genre / book categories and a one-two sentence summary — from MusicBrainz
-  community genres and Open Library work descriptions where they exist, and
-  from Claude (with the same API key as photo identification) everywhere
-  else. Both are editable, searchable, shown on the item page, and in the
-  CSV export.
+  genre / book categories and a summary — records get a sentence or two;
+  books get a fuller "about": what the book is about plus notable context
+  (awards, series, significance) and the page count where known. Sourced
+  from MusicBrainz genres, Open Library / Google Books descriptions, and
+  Claude (same API key as photo identification) for whatever's missing.
+  All editable, searchable, on the item page, and in the CSV export.
 - **Hear it**: every track row on a record's page has a play button — a
   30-second preview found via the iTunes Search API (previews are of the
   digital release; pre-digital rarities may have none).

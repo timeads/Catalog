@@ -402,7 +402,9 @@ function openDraftFrom(found) {
 // the databases found or the user typed.
 async function maybeEnrichDraft(target) {
   const key = getVisionKey();
-  if (!key || !target.title || (target.genre && target.summary)) return;
+  // A stub blurb on a book ("First edition.") still deserves a real About.
+  const summaryOk = target.summary && !(target.kind === 'book' && target.summary.length < 60);
+  if (!key || !target.title || (target.genre && summaryOk)) return;
   let extra = null;
   try { extra = await enrichItem(target, key); } catch { return; }
   if (!extra) return;
@@ -412,9 +414,13 @@ async function maybeEnrichDraft(target) {
     target.genre = extra.genre;
     if (live && !form.elements.genre.value.trim()) form.elements.genre.value = extra.genre;
   }
-  if (extra.summary && !target.summary) {
+  if (extra.summary && !summaryOk) {
+    const oldStub = target.summary;
     target.summary = extra.summary;
-    if (live && !form.elements.summary.value.trim()) form.elements.summary.value = extra.summary;
+    if (live) {
+      const current = form.elements.summary.value.trim();
+      if (!current || current === oldStub) form.elements.summary.value = extra.summary;
+    }
   }
   // If it was saved before the answer arrived, update the stored item too.
   if (items.some((i) => i.id === target.id)) {
@@ -469,7 +475,7 @@ function renderForm() {
   $('#form-title').textContent = isEdit ? 'Edit item'
     : draft.title ? 'Check & save' : 'New item';
   setFormKind(draft.kind);
-  for (const name of ['title', 'creator', 'year', 'format', 'publisher', 'genre', 'barcode', 'condition', 'summary', 'notes', 'value']) {
+  for (const name of ['title', 'creator', 'year', 'format', 'publisher', 'genre', 'barcode', 'condition', 'summary', 'notes', 'value', 'pages']) {
     form.elements[name].value = draft[name] || '';
   }
   form.elements.tags.value = (draft.tags || []).join(', ');
@@ -612,7 +618,7 @@ async function saveForm(ev) {
     toast('A title is all it needs — add one to save.');
     return;
   }
-  for (const name of ['creator', 'year', 'format', 'publisher', 'genre', 'barcode', 'condition', 'summary', 'notes']) {
+  for (const name of ['creator', 'year', 'format', 'publisher', 'genre', 'barcode', 'condition', 'summary', 'notes', 'pages']) {
     draft[name] = form.elements[name].value.trim();
   }
   const newValue = form.elements.value.value.trim();
@@ -768,6 +774,7 @@ function renderDetail(item) {
   const meta = [item.year, item.genre, item.format, item.condition].filter(Boolean);
   const rows = [
     [item.kind === 'book' ? 'Publisher' : 'Label', item.publisher],
+    ['Pages', item.pages],
     ['Barcode', item.barcode, 'mono'],
     ['Added', new Date(item.createdAt).toLocaleDateString()],
     ['Notes', item.notes],
@@ -1230,7 +1237,7 @@ async function exportJson() {
 }
 
 function exportCsv() {
-  const cols = ['kind', 'title', 'creator', 'year', 'format', 'publisher', 'genre', 'condition', 'barcode', 'summary', 'value', 'valueDate', 'tags', 'notes', 'createdAt'];
+  const cols = ['kind', 'title', 'creator', 'year', 'format', 'publisher', 'genre', 'condition', 'barcode', 'pages', 'summary', 'value', 'valueDate', 'tags', 'notes', 'createdAt'];
   const cell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
   const lines = [cols.join(',')];
   for (const it of items) {

@@ -39,7 +39,8 @@ function blobToB64(blob) {
 
 const PROMPT = `This is a photo of a record sleeve or a book cover from a personal collection.
 Identify it. Respond with ONLY a JSON object, no other text:
-{"kind": "record" or "book", "title": "...", "creator": "artist or author name", "year": "release/publication year if visible or well known, else empty string", "genre": "1-3 comma-separated music genres or book categories, else empty string", "summary": "one or two factual sentences about this specific release/book if you recognize it, else empty string", "confidence": "high"/"medium"/"low"}
+{"kind": "record" or "book", "title": "...", "creator": "artist or author name", "year": "release/publication year if visible or well known, else empty string", "genre": "1-3 comma-separated music genres or book categories, else empty string", "summary": "...", "confidence": "high"/"medium"/"low"}
+For the summary, only if you recognize the specific item: for a record, one or two factual sentences about the release; for a book, 2-4 sentences on what the book is about, ending with one sentence of notable context (awards, series position, or why it matters). Empty string if unrecognized.
 If you cannot read or recognize the item at all, respond {"kind": "", "title": "", "creator": "", "year": "", "genre": "", "summary": "", "confidence": "low"}.`;
 
 // Returns {kind, title, creator, year, confidence} or throws with a
@@ -57,7 +58,7 @@ export async function identifyPhoto(blob, key) {
       },
       body: JSON.stringify({
         model: 'claude-opus-5',
-        max_tokens: 512,
+        max_tokens: 700,
         output_config: { effort: 'low' },
         messages: [{
           role: 'user',
@@ -112,9 +113,12 @@ export async function identifyPhoto(blob, key) {
 // empty strings when the item isn't recognized.
 export async function enrichItem(item, key) {
   const what = item.kind === 'book' ? 'book' : 'album/record';
+  const summarySpec = item.kind === 'book'
+    ? '2-4 sentences on what the book is about, ending with one sentence of notable context (awards, series position, or why it matters)'
+    : 'one or two factual sentences about this specific release';
   const prompt = `Cataloging a personal collection. Item: ${what} "${item.title}" by ${item.creator || 'unknown'}${item.year ? ` (${item.year})` : ''}.
 Respond with ONLY a JSON object, no other text:
-{"genre": "1-3 comma-separated ${item.kind === 'book' ? 'book categories' : 'music genres'}", "summary": "one or two factual sentences about this specific ${what}"}
+{"genre": "1-3 comma-separated ${item.kind === 'book' ? 'book categories' : 'music genres'}", "summary": "${summarySpec}"}
 If you don't recognize this specific ${what}, use empty strings — do not guess or invent details.`;
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -126,7 +130,7 @@ If you don't recognize this specific ${what}, use empty strings — do not guess
     },
     body: JSON.stringify({
       model: 'claude-opus-5',
-      max_tokens: 400,
+      max_tokens: item.kind === 'book' ? 700 : 400,
       output_config: { effort: 'low' },
       messages: [{ role: 'user', content: prompt }],
     }),

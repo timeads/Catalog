@@ -51,6 +51,7 @@ async function openLibraryByIsbn(isbn) {
     genre: (b.subjects || []).slice(0, 2).map((s) => s.name).join(', '),
     coverUrl: (b.cover && (b.cover.medium || b.cover.large)) || '',
     barcode: isbn,
+    pages: b.number_of_pages ? String(b.number_of_pages) : '',
   };
 }
 
@@ -71,12 +72,14 @@ async function googleBooks(query, barcode) {
     coverUrl: ((v.imageLinks && (v.imageLinks.thumbnail || v.imageLinks.smallThumbnail)) || '')
       .replace('http://', 'https://'),
     barcode: barcode || '',
+    pages: v.pageCount ? String(v.pageCount) : '',
+    summary: v.description ? String(v.description).split('\n')[0].slice(0, 600) : '',
   };
 }
 
 export async function searchBooks(query) {
   const data = await getJson(
-    `https://openlibrary.org/search.json?q=${encodeURIComponent(query)}&limit=12&fields=title,author_name,first_publish_year,cover_i,isbn,publisher`
+    `https://openlibrary.org/search.json?q=${encodeURIComponent(query)}&limit=12&fields=title,author_name,first_publish_year,cover_i,isbn,publisher,number_of_pages_median`
   );
   if (!data || !data.docs) return [];
   return data.docs.map((d) => ({
@@ -89,6 +92,7 @@ export async function searchBooks(query) {
     genre: '',
     coverUrl: d.cover_i ? `https://covers.openlibrary.org/b/id/${d.cover_i}-M.jpg` : '',
     barcode: '',
+    pages: d.number_of_pages_median ? String(d.number_of_pages_median) : '',
   }));
 }
 
@@ -142,7 +146,7 @@ export async function fetchBookDescription(isbn) {
   if (d && typeof d === 'object') d = d.value;
   if (!d) return '';
   d = String(d).split('\n')[0].trim();
-  return d.length > 400 ? `${d.slice(0, 397)}…` : d;
+  return d.length > 600 ? `${d.slice(0, 597)}…` : d;
 }
 
 async function musicBrainzByBarcode(code) {

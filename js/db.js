@@ -63,7 +63,8 @@ export function newItem(kind) {
     condition: '',
     tags: [],
     notes: '',
-    summary: '', // a sentence or two about the release/book
+    summary: '', // records: a sentence or two; books: a fuller "about" paragraph
+    pages: '', // books: page count, when the databases know it
     tracks: [], // records: [{no, title, ms}] from MusicBrainz
     mbid: '', // MusicBrainz release id, when known
     discogsId: '', // Discogs release id, once matched
