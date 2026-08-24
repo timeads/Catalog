@@ -2,7 +2,7 @@
 // connection. Metadata lookups stay network-only; covers and fonts are cached
 // as they're fetched.
 
-const VERSION = 'stacks-v17';
+const VERSION = 'stacks-v18';
 const SHELL = [
   './',
   'index.html',
@@ -16,7 +16,6 @@ const SHELL = [
   'js/value.js',
   'js/identify.js',
   'js/lock.js',
-  'js/bgremove.js',
   'vendor/zxing.min.js',
   'manifest.webmanifest',
   'icons/icon.svg',
@@ -45,8 +44,6 @@ const CACHEABLE_HOSTS = [
   'coverartarchive.org',
   'archive.org', // Cover Art Archive redirects resolve here
   'books.google.com',
-  'cdn.jsdelivr.net', // background-removal library
-  'staticimgly.com',  // its ONNX model + wasm assets
 ];
 
 self.addEventListener('fetch', (e) => {
