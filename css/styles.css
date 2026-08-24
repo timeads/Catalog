@@ -423,6 +423,18 @@ input:focus, textarea:focus, select:focus {
 
 .chip.is-active::after { content: " ✕"; font-size: 10px; }
 
+.chip .chip-ico {
+  width: 11px;
+  height: 11px;
+  fill: currentColor;
+  vertical-align: -1px;
+  margin-right: 4px;
+}
+
+/* Shelf chips are the second level of the location drill-down. */
+.chip.shelf-chip { border-style: dashed; }
+.chip.shelf-chip.is-active { border-style: solid; border-color: transparent; }
+
 /* ---------- home ---------- */
 
 .stat-cards {

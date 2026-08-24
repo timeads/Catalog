@@ -15,6 +15,8 @@ import { getBookcases, saveBookcases, newBookcase, locationLabel, getBookcasesBu
 let items = [];
 let filterKind = 'all';
 let filterTag = null;
+let filterBookcase = ''; // bookcase id the library is narrowed to
+let filterShelf = ''; // shelf number within that bookcase, as a string
 let searchQuery = '';
 let sortBy = 'added';
 let searchKind = 'record'; // online-search toggle
@@ -234,6 +236,9 @@ function renderHome() {
   $('#stat-records').textContent = records;
   $('#stat-books').textContent = items.length - records;
   $('#stat-shelves').textContent = [...new Set(items.flatMap((i) => i.tags || []))].length;
+  const cases = getBookcases();
+  $('#stat-locations-card').hidden = cases.length === 0;
+  $('#stat-locations').textContent = cases.length;
   const total = items.reduce((sum, i) => sum + parseValue(i.value), 0);
   $('#stat-value-card').hidden = total <= 0;
   if (total > 0) $('#stat-value').textContent = fmtMoney(total);
@@ -269,6 +274,10 @@ function visibleItems() {
   const list = items.filter((it) => {
     if (filterKind !== 'all' && it.kind !== filterKind) return false;
     if (filterTag && !it.tags.includes(filterTag)) return false;
+    if (filterBookcase) {
+      if (it.bookcaseId !== filterBookcase) return false;
+      if (filterShelf && String(it.shelf) !== filterShelf) return false;
+    }
     if (terms.length) {
       const hay = fold([it.title, it.creator, it.publisher, it.genre, it.year,
         it.format, it.notes, it.summary, it.barcode, locationLabel(it),
@@ -313,7 +322,7 @@ function renderLibrary() {
   const grid = $('#library-grid');
   const records = items.filter((i) => i.kind === 'record').length;
   const books = items.length - records;
-  const filtered = !!(filterTag || filterKind !== 'all' || searchQuery);
+  const filtered = !!(filterTag || filterKind !== 'all' || searchQuery || filterBookcase);
 
   $('#library-empty').hidden = items.length > 0;
   $('#library-noresults').hidden = !(items.length > 0 && list.length === 0);
@@ -328,6 +337,24 @@ function renderLibrary() {
   tagRow.innerHTML = tags.map((t) =>
     `<button class="chip${t === filterTag ? ' is-active' : ''}" data-tag="${esc(t)}">${esc(t)}</button>`
   ).join('');
+
+  // Location chips: pick a bookcase, then narrow to one of its shelves.
+  const cases = getBookcases();
+  if (filterBookcase && !cases.some((c) => c.id === filterBookcase)) {
+    filterBookcase = ''; // the bookcase was deleted in Settings
+    filterShelf = '';
+  }
+  const activeCase = cases.find((c) => c.id === filterBookcase);
+  const locRow = $('#loc-row');
+  locRow.hidden = cases.length === 0;
+  const pin = '<svg class="chip-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a7 7 0 0 0-7 7c0 5.2 7 13 7 13s7-7.8 7-13a7 7 0 0 0-7-7zm0 9.5a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5z"/></svg>';
+  locRow.innerHTML = cases.map((c) =>
+    `<button class="chip${c.id === filterBookcase ? ' is-active' : ''}" data-loc="${esc(c.id)}">${pin}${esc(c.name)}</button>`
+  ).join('') + (activeCase && activeCase.shelves > 1
+    ? Array.from({ length: activeCase.shelves }, (_, i) =>
+        `<button class="chip shelf-chip${String(i + 1) === filterShelf ? ' is-active' : ''}" data-shelfno="${i + 1}">Shelf ${i + 1}</button>`
+      ).join('')
+    : '');
 
   $('#clear-filters').hidden = !filtered;
   $('#view-grid-btn').classList.toggle('is-active', viewMode === 'grid');
@@ -1407,9 +1434,22 @@ function bindEvents() {
     filterTag = filterTag === btn.dataset.tag ? null : btn.dataset.tag;
     renderLibrary();
   });
+  $('#loc-row').addEventListener('click', (e) => {
+    const loc = e.target.closest('[data-loc]');
+    const shelf = e.target.closest('[data-shelfno]');
+    if (loc) {
+      filterBookcase = filterBookcase === loc.dataset.loc ? '' : loc.dataset.loc;
+      filterShelf = '';
+    } else if (shelf) {
+      filterShelf = filterShelf === shelf.dataset.shelfno ? '' : shelf.dataset.shelfno;
+    } else return;
+    renderLibrary();
+  });
   $('#clear-filters').addEventListener('click', () => {
     filterKind = 'all';
     filterTag = null;
+    filterBookcase = '';
+    filterShelf = '';
     searchQuery = '';
     $('#search-input').value = '';
     $$('.kind-chip[data-kind]').forEach((x) => x.classList.toggle('is-active', x.dataset.kind === 'all'));
