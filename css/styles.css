@@ -1455,6 +1455,61 @@ body.is-locked .shell,
 body.is-locked .tabbar,
 body.is-locked .toast { display: none !important; }
 
+/* ---------- inline barcode capture ---------- */
+
+.barcode-pair {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+}
+
+.barcode-pair input { flex: 1; min-width: 0; }
+
+.icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  flex-shrink: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r);
+  background: var(--surface);
+  cursor: pointer;
+  color: var(--ink-2);
+}
+
+.icon-btn svg { width: 20px; height: 20px; fill: currentColor; }
+
+.icon-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+.mini-scan {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(15, 14, 13, 0.55);
+  display: grid;
+  place-items: center;
+  padding: 20px;
+}
+
+.mini-scan-card {
+  width: min(400px, 100%);
+  background: var(--surface);
+  border-radius: var(--r-xl);
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+  box-shadow: var(--shadow-2);
+}
+
+.scanner-frame.mini {
+  max-width: none;
+  aspect-ratio: 4 / 3;
+  margin: 0;
+}
+
+.mini-scan-card .scan-status { margin: 0 2px; }
+
 /* ---------- toast ---------- */
 
 .toast {

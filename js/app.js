@@ -129,6 +129,7 @@ function route() {
   path = ROUTE_ALIASES[path] || path;
 
   if (stopScan) { stopScan(); stopScan = null; }
+  closeMiniScanner();
   stopPreview();
   closeSheet();
   Object.values(views).forEach((v) => { v.hidden = true; });
@@ -429,6 +430,36 @@ async function maybeEnrichDraft(target) {
     if (currentView === 'detail') rerender();
     scheduleSync();
   }
+}
+
+/* ---------------- inline barcode capture (form) ---------------- */
+
+let stopMiniScan = null;
+
+async function openMiniScanner() {
+  $('#mini-scan').hidden = false;
+  const status = $('#mini-scan-status');
+  status.textContent = 'Starting camera…';
+  try {
+    stopMiniScan = await startScanner($('#mini-scan-video'), (code) => {
+      const digits = code.replace(/[^0-9Xx]/g, '');
+      $('#item-form').elements.barcode.value = digits;
+      if (draft) draft.barcode = digits;
+      if (navigator.vibrate) navigator.vibrate(60);
+      closeMiniScanner();
+      toast(`Barcode ${digits} captured.`);
+    });
+    status.textContent = 'Line the barcode up in the frame.';
+  } catch (err) {
+    status.textContent = err && err.name === 'NotAllowedError'
+      ? 'Camera permission was denied — type the number into the field instead.'
+      : 'The camera is unavailable — type the number into the field instead.';
+  }
+}
+
+function closeMiniScanner() {
+  if (stopMiniScan) { stopMiniScan(); stopMiniScan = null; }
+  $('#mini-scan').hidden = true;
 }
 
 /* ---------------- online search ---------------- */
@@ -1298,7 +1329,11 @@ function bindEvents() {
     if (e.target.closest('[data-close-sheet]')) closeSheet();
   });
   $('#sheet-backdrop').addEventListener('click', closeSheet);
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSheet(); });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { closeSheet(); closeMiniScanner(); }
+  });
+  $('#form-scan-btn').addEventListener('click', openMiniScanner);
+  $('#mini-scan-close').addEventListener('click', closeMiniScanner);
 
   $('#search-input').addEventListener('input', (e) => {
     searchQuery = e.target.value;
