@@ -422,11 +422,16 @@ function renderLibrary() {
   const pin = '<svg class="chip-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a7 7 0 0 0-7 7c0 5.2 7 13 7 13s7-7.8 7-13a7 7 0 0 0-7-7zm0 9.5a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5z"/></svg>';
   locRow.innerHTML = cases.map((c) =>
     `<button class="chip${c.id === filterBookcase ? ' is-active' : ''}" data-loc="${esc(c.id)}">${pin}${esc(c.name)}</button>`
-  ).join('') + (activeCase && activeCase.shelves > 1
+  ).join('');
+  // Shelves drop into their own row below, so they never hide at the end
+  // of a scrolling bookcase row.
+  const shelfRow = $('#shelf-row');
+  shelfRow.hidden = !(activeCase && activeCase.shelves > 1);
+  shelfRow.innerHTML = activeCase && activeCase.shelves > 1
     ? Array.from({ length: activeCase.shelves }, (_, i) =>
         `<button class="chip shelf-chip${String(i + 1) === filterShelf ? ' is-active' : ''}" data-shelfno="${i + 1}">Shelf ${i + 1}</button>`
       ).join('')
-    : '');
+    : '';
 
   $('#clear-filters').hidden = !filtered;
   $('#view-grid-btn').classList.toggle('is-active', viewMode === 'grid');
@@ -1519,13 +1524,15 @@ function bindEvents() {
   });
   $('#loc-row').addEventListener('click', (e) => {
     const loc = e.target.closest('[data-loc]');
+    if (!loc) return;
+    filterBookcase = filterBookcase === loc.dataset.loc ? '' : loc.dataset.loc;
+    filterShelf = '';
+    renderLibrary();
+  });
+  $('#shelf-row').addEventListener('click', (e) => {
     const shelf = e.target.closest('[data-shelfno]');
-    if (loc) {
-      filterBookcase = filterBookcase === loc.dataset.loc ? '' : loc.dataset.loc;
-      filterShelf = '';
-    } else if (shelf) {
-      filterShelf = filterShelf === shelf.dataset.shelfno ? '' : shelf.dataset.shelfno;
-    } else return;
+    if (!shelf) return;
+    filterShelf = filterShelf === shelf.dataset.shelfno ? '' : shelf.dataset.shelfno;
     renderLibrary();
   });
   $('#clear-filters').addEventListener('click', () => {
