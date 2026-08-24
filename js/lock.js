@@ -182,7 +182,7 @@ export async function resetDevice() {
   removeStoredSyncConfig();
   removeStoredDiscogsToken();
   removeStoredVisionKey();
-  for (const k of ['stacks-sync-covers', 'stacks-sync-last', 'stacks-tombstones']) {
+  for (const k of ['stacks-sync-covers', 'stacks-sync-last', 'stacks-tombstones', 'stacks-token-meta']) {
     localStorage.removeItem(k);
   }
   await new Promise((resolve) => {

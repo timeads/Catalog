@@ -86,6 +86,12 @@ edit wins) and deletions propagate. The repo ends up holding `catalog.json`
 plus `covers/*.jpg`, so it doubles as another backup. The token is stored
 only in the browser's local storage and sent only to `api.github.com`.
 
+The optional Discogs token and Claude API key also sync through the data
+repo (stored inside `catalog.json` — private, and only readable with the
+GitHub token anyway), so pasting them once is enough. The GitHub token
+itself never syncs: it's the credential that unlocks the repo, so each
+device needs it pasted once.
+
 ## Getting it running
 
 ### Hosted (recommended — this is how the phone camera works)

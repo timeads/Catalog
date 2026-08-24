@@ -2,7 +2,7 @@ import { getAllItems, putItem, deleteItem, newItem, newPhoto, migrateItem } from
 import { lookupBarcode, searchBooks, searchRecords, fetchReleaseDetails, fetchBookDescription, findArchivePhotos } from './lookup.js';
 import { getVisionKey, setVisionKey, identifyPhoto, enrichItem } from './identify.js';
 import { startScanner } from './scanner.js';
-import { getSyncConfig, setSyncConfig, lastSyncedAt, recordTombstone, syncNow } from './sync.js';
+import { getSyncConfig, setSyncConfig, lastSyncedAt, recordTombstone, syncNow, markTokenUpdated } from './sync.js';
 import { getDiscogsToken, setDiscogsToken, parseValue, fmtMoney, marketLinks, discogsStats } from './value.js';
 import {
   isLockEnabled, unlock, enableLock, disableLock, changePassphrase,
@@ -1176,6 +1176,13 @@ async function runSync(reason) {
       renderSyncIndicators();
     });
     syncUiState = { status: 'idle', text: '' };
+    if (result && result.tokensAdopted) {
+      // Tokens that arrived from another device: seal them if the lock is
+      // on, and let the settings panels reflect the new state.
+      await resealIfLocked();
+      discogsCache.clear();
+      if (currentView === 'settings') renderSettings();
+    }
     if (result && result.applied) {
       items = await getAllItems();
       for (const u of photoUrls.values()) URL.revokeObjectURL(u);
@@ -1275,9 +1282,11 @@ function renderDiscogsPanel() {
       </div>`;
     $('#discogs-remove').addEventListener('click', async () => {
       setDiscogsToken('');
+      markTokenUpdated('discogs');
       await resealIfLocked();
       discogsCache.clear();
       renderDiscogsPanel();
+      scheduleSync();
     });
   } else {
     panel.innerHTML = `
@@ -1290,15 +1299,17 @@ function renderDiscogsPanel() {
       <div class="form-actions">
         <button id="discogs-save" class="btn btn-accent" type="button">Save token</button>
       </div>
-      <p class="sync-note">Stored only in this browser and sent only to api.discogs.com.</p>`;
+      <p class="sync-note">Sent only to api.discogs.com. With device sync on, the token travels to your other devices through your private data repo.</p>`;
     $('#discogs-save').addEventListener('click', async () => {
       const token = $('#discogs-token-input').value.trim();
       if (!token) { toast('Paste the token first.'); return; }
       setDiscogsToken(token);
+      markTokenUpdated('discogs');
       await resealIfLocked();
       discogsCache.clear();
       renderDiscogsPanel();
       toast('Discogs connected.');
+      scheduleSync();
     });
   }
 }
@@ -1593,8 +1604,10 @@ function renderVisionPanel() {
       </div>`;
     $('#vision-remove').addEventListener('click', async () => {
       setVisionKey('');
+      markTokenUpdated('vision');
       await resealIfLocked();
       renderVisionPanel();
+      scheduleSync();
     });
   } else {
     panel.innerHTML = `
@@ -1607,14 +1620,16 @@ function renderVisionPanel() {
       <div class="form-actions">
         <button id="vision-save" class="btn btn-accent" type="button">Save key</button>
       </div>
-      <p class="sync-note">Stored only in this browser (encrypted when the app lock is on) and sent only to api.anthropic.com along with the photo.</p>`;
+      <p class="sync-note">Sent only to api.anthropic.com along with the photo (stored encrypted when the app lock is on). With device sync on, the key travels to your other devices through your private data repo.</p>`;
     $('#vision-save').addEventListener('click', async () => {
       const key = $('#vision-key-input').value.trim();
       if (!key) { toast('Paste the API key first.'); return; }
       setVisionKey(key);
+      markTokenUpdated('vision');
       await resealIfLocked();
       renderVisionPanel();
       toast('Photo identification is on.');
+      scheduleSync();
     });
   }
 }

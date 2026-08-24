@@ -5,6 +5,8 @@
 
 import { getAllItems, putItem, deleteItem, migrateItem } from './db.js';
 import { getBookcasesBundle, adoptBookcasesBundle } from './locations.js';
+import { getDiscogsToken, setDiscogsToken } from './value.js';
+import { getVisionKey, setVisionKey } from './identify.js';
 
 const CFG_KEY = 'stacks-sync-config';
 const COVERS_KEY = 'stacks-sync-covers'; // {itemId: {sha, ts}} pushed from this device
@@ -59,6 +61,57 @@ export function recordTombstone(id) {
   const t = readJson(TOMB_KEY, {});
   t[id] = new Date().toISOString();
   writeJson(TOMB_KEY, t);
+}
+
+/* ---------------- token sync ---------------- */
+
+// The Discogs token and Claude key ride along in catalog.json so a second
+// device gets them without re-pasting — the repo is private, and reading it
+// already requires the GitHub token. The GitHub token itself never syncs
+// (it's the credential that unlocks the repo in the first place).
+// Per-token newest-change-wins; explicit removals propagate too.
+
+const TOKEN_META_KEY = 'stacks-token-meta'; // {discogs: changedAtISO, vision: changedAtISO}
+const TOKEN_EPOCH = '2000-01-01T00:00:00.000Z'; // "existed before token sync did"
+
+const TOKEN_ACCESS = {
+  discogs: { get: getDiscogsToken, set: setDiscogsToken },
+  vision: { get: getVisionKey, set: setVisionKey },
+};
+
+// Call when the user saves or removes a token, so their change wins merges.
+export function markTokenUpdated(name) {
+  const meta = readJson(TOKEN_META_KEY, {});
+  meta[name] = new Date().toISOString();
+  writeJson(TOKEN_META_KEY, meta);
+}
+
+function tokensBundle() {
+  const meta = readJson(TOKEN_META_KEY, {});
+  const out = {};
+  let metaDirty = false;
+  for (const [name, { get }] of Object.entries(TOKEN_ACCESS)) {
+    const v = get() || '';
+    if (v && !meta[name]) { meta[name] = TOKEN_EPOCH; metaDirty = true; }
+    out[name] = { v, ts: meta[name] || '' };
+  }
+  if (metaDirty) writeJson(TOKEN_META_KEY, meta);
+  return out;
+}
+
+function adoptTokensBundle(remote) {
+  if (!remote) return false;
+  const meta = readJson(TOKEN_META_KEY, {});
+  let changed = false;
+  for (const [name, { set }] of Object.entries(TOKEN_ACCESS)) {
+    const r = remote[name];
+    if (!r || !r.ts || r.ts <= (meta[name] || '')) continue;
+    set(r.v || '');
+    meta[name] = r.ts;
+    changed = true;
+  }
+  if (changed) writeJson(TOKEN_META_KEY, meta);
+  return changed;
 }
 
 /* ---------------- GitHub contents API ---------------- */
@@ -252,6 +305,11 @@ export async function syncNow(onProgress = () => {}) {
       // Bookcase list: one bundle, newest edit wins.
       if (adoptBookcasesBundle(remote?.bookcases)) applied++;
 
+      // Discogs/Claude tokens: adopt newer remote changes, then carry the
+      // result in the payload.
+      const tokensAdopted = adoptTokensBundle(remote?.tokens);
+      if (tokensAdopted) applied++;
+
       // Push the merged catalog if it differs from what the remote had.
       const payload = {
         app: 'stacks',
@@ -260,9 +318,10 @@ export async function syncNow(onProgress = () => {}) {
         items: [...merged.values()].map(serialize),
         deleted: tombs,
         bookcases: getBookcasesBundle(),
+        tokens: tokensBundle(),
       };
-      const remoteComparable = JSON.stringify({ items: (remote?.items || []), deleted: remoteTombs, bookcases: remote?.bookcases || { updatedAt: '', list: [] } });
-      const mergedComparable = JSON.stringify({ items: payload.items, deleted: payload.deleted, bookcases: payload.bookcases });
+      const remoteComparable = JSON.stringify({ items: (remote?.items || []), deleted: remoteTombs, bookcases: remote?.bookcases || { updatedAt: '', list: [] }, tokens: remote?.tokens || null });
+      const mergedComparable = JSON.stringify({ items: payload.items, deleted: payload.deleted, bookcases: payload.bookcases, tokens: payload.tokens });
       let pushed = false;
       if (remoteComparable !== mergedComparable) {
         onProgress('Uploading catalog…');
@@ -276,7 +335,7 @@ export async function syncNow(onProgress = () => {}) {
 
       writeJson(TOMB_KEY, tombs);
       localStorage.setItem(LAST_KEY, new Date().toISOString());
-      return { applied, pushed };
+      return { applied, pushed, tokensAdopted };
     }
     throw new Error('Another device kept updating — try syncing again.');
   } finally {
