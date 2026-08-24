@@ -1,6 +1,7 @@
 import { getAllItems, putItem, deleteItem, newItem, newPhoto, migrateItem } from './db.js';
 import { lookupBarcode, searchBooks, searchRecords, fetchReleaseDetails, fetchBookDescription, findArchivePhotos } from './lookup.js';
 import { getVisionKey, setVisionKey, identifyPhoto, enrichItem } from './identify.js';
+import { removePhotoBackground } from './bgremove.js';
 import { startScanner } from './scanner.js';
 import { getSyncConfig, setSyncConfig, lastSyncedAt, recordTombstone, syncNow } from './sync.js';
 import { getDiscogsToken, setDiscogsToken, parseValue, fmtMoney, marketLinks, discogsStats } from './value.js';
@@ -556,7 +557,9 @@ function renderShelfSelect(shelf) {
 
 function renderFormCover() {
   $('#form-cover').innerHTML = coverHtml(draft);
-  $('#cover-clear').hidden = !(draft.photos || []).length;
+  const hasPhoto = !!(draft.photos || []).length;
+  $('#cover-clear').hidden = !hasPhoto;
+  $('#cover-cutout').hidden = !hasPhoto;
 }
 
 // Downscale a photo to a small JPEG blob so sync and backups stay light.
@@ -893,12 +896,10 @@ function renderDetail(item) {
       </label>
       <label class="photo-add" for="detail-photo-file" title="Add from library">＋</label>
     </div>
-    ${shown && photos.length > 1 ? `
+    ${shown ? `
       <div class="photo-actions">
         ${photos[0] !== shown ? '<button id="photo-default" class="btn btn-quiet" type="button">Make this the cover</button>' : ''}
-        <button id="photo-remove" class="btn btn-danger" type="button">Remove photo</button>
-      </div>` : shown ? `
-      <div class="photo-actions">
+        <button id="photo-cutout" class="btn btn-quiet" type="button">Remove background</button>
         <button id="photo-remove" class="btn btn-danger" type="button">Remove photo</button>
       </div>` : ''}
     <p id="archive-status" class="scan-status" hidden></p>
@@ -995,8 +996,45 @@ function bindDetailPhotoEvents(item, shown) {
     });
   }
 
+  const cutout = $('#photo-cutout');
+  if (cutout) {
+    cutout.addEventListener('click', async () => {
+      cutout.disabled = true;
+      try {
+        const source = await photoBlobOf(shown);
+        if (!source) throw new Error('This photo has no image data to work on.');
+        const cut = await removePhotoBackground(source, (text) => { cutout.textContent = text; });
+        // Non-destructive: the cutout joins the gallery next to the original
+        // (in front of it when the original is the cover, so it takes over).
+        const idx = item.photos.indexOf(shown);
+        const photo = newPhoto({ blob: cut, label: shown.label });
+        item.photos.splice(idx <= 0 ? 0 : idx + 1, 0, photo);
+        detailSelectedPhoto = photo.id;
+        await saveItemMutation(item);
+        toast('Background removed — the original is still in the gallery.');
+      } catch (err) {
+        cutout.textContent = 'Remove background';
+        cutout.disabled = false;
+        toast(err && err.message ? err.message : 'Background removal failed.');
+      }
+    });
+  }
+
   const find = $('#find-archive');
   if (find) find.addEventListener('click', () => runArchiveSearch(item));
+}
+
+// A photo added on this device has a blob; an archive image may only have a
+// URL until cachePhotoBlobs catches up — fetch it when needed.
+async function photoBlobOf(photo) {
+  if (photo.blob) return photo.blob;
+  if (photo.url) {
+    try {
+      const res = await fetch(photo.url);
+      if (res.ok) return await res.blob();
+    } catch { /* fall through */ }
+  }
+  return null;
 }
 
 async function runArchiveSearch(item) {
@@ -1441,6 +1479,27 @@ function bindEvents() {
     if (removed) photoUrls.delete(removed.id);
     migrateItem(draft);
     renderFormCover();
+  });
+  $('#cover-cutout').addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    try {
+      const target = draft;
+      const source = await photoBlobOf((target.photos || [])[0] || {});
+      if (!source) throw new Error('Add a cover photo first.');
+      const cut = await removePhotoBackground(source, (text) => { btn.textContent = text; });
+      if (draft !== target) return; // form moved on while the model ran
+      // The cutout becomes the cover; the original stays behind it.
+      draft.photos.unshift(newPhoto({ blob: cut }));
+      migrateItem(draft);
+      renderFormCover();
+      toast('Background removed — the original stays in the gallery.');
+    } catch (err) {
+      toast(err && err.message ? err.message : 'Background removal failed.');
+    } finally {
+      btn.textContent = 'Remove background';
+      btn.disabled = false;
+    }
   });
   $('#detail-photo-file').addEventListener('change', onDetailPhotosPicked);
   $('#detail-photo-camera').addEventListener('change', onDetailPhotosPicked);

@@ -25,6 +25,13 @@ own.
   cover. **Find in the archives** pulls every image the open databases hold
   for the item: for records that's the Cover Art Archive set (front, back,
   labels, booklets), for books the Open Library edition covers.
+- **Remove the background** from any photo you take — a one-tap cutout that
+  lifts the book or record cleanly off the table it was photographed on.
+  Runs entirely in the browser ([IMG.LY's open-source
+  model](https://github.com/imgly/background-removal-js)): free, no account,
+  and the photo never leaves the device. The first use downloads the ~40 MB
+  model, which is then cached for offline reuse. The cutout is added
+  alongside the original, so nothing is lost if the result disappoints.
 - **Genre & summary, automatically**: every add path fills in the music
   genre / book categories and a summary — records get a sentence or two;
   books get a fuller "about": what the book is about plus notable context
@@ -121,6 +128,7 @@ js/db.js              IndexedDB storage
 js/lookup.js          Open Library / Google Books / MusicBrainz lookups
 js/scanner.js         camera + BarcodeDetector, ZXing fallback
 js/sync.js            GitHub-repo sync (merge + tombstones + covers)
+js/bgremove.js        in-browser background removal (IMG.LY ONNX model)
 vendor/zxing.min.js   vendored @zxing/library UMD bundle (v0.21.3)
 sw.js                 offline cache
 manifest.webmanifest  PWA install metadata
