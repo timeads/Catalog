@@ -1371,6 +1371,16 @@ input:focus, textarea:focus, select:focus {
   font-variant-numeric: tabular-nums;
 }
 
+.location-actions { display: flex; gap: 14px; }
+
+.location-row.is-editing {
+  grid-template-columns: 1fr 72px auto;
+  gap: 8px;
+  padding: 9px 0;
+}
+
+.location-edit-actions { display: flex; gap: 6px; }
+
 .location-add {
   display: grid;
   grid-template-columns: 1fr 84px auto;

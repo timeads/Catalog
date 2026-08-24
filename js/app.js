@@ -24,6 +24,7 @@ let draft = null; // item being created/edited in the form
 let stopScan = null; // active scanner's stop()
 let currentView = 'home';
 let detailSelectedPhoto = null; // photo id highlighted on the detail page
+let editingBookcase = null; // bookcase id being edited in Settings
 const photoUrls = new Map(); // photo id (or item id, legacy) -> object URL
 
 let pendingReload = false; // a new app version is ready; apply when safe
@@ -1545,11 +1546,25 @@ function renderLocationsPanel() {
   const cases = getBookcases();
   const rows = cases.map((b) => {
     const count = items.filter((i) => i.bookcaseId === b.id).length;
+    if (editingBookcase === b.id) {
+      return `
+      <div class="location-row is-editing" data-id="${esc(b.id)}">
+        <input class="location-edit-name" type="text" value="${esc(b.name)}" aria-label="Bookcase name">
+        <input class="location-edit-shelves" type="text" inputmode="numeric" value="${b.shelves}" aria-label="Number of shelves">
+        <span class="location-edit-actions">
+          <button class="btn btn-accent location-save" type="button">Save</button>
+          <button class="btn btn-quiet location-cancel" type="button">Cancel</button>
+        </span>
+      </div>`;
+    }
     return `
       <div class="location-row" data-id="${esc(b.id)}">
         <span class="location-name">${esc(b.name)}</span>
         <span class="location-meta">${b.shelves} shel${b.shelves === 1 ? 'f' : 'ves'} · ${count} item${count === 1 ? '' : 's'}</span>
-        <button class="clear-link location-remove" type="button">Remove</button>
+        <span class="location-actions">
+          <button class="clear-link location-edit" type="button">Edit</button>
+          <button class="clear-link location-remove" type="button">Remove</button>
+        </span>
       </div>`;
   }).join('');
   panel.innerHTML = `
@@ -1569,6 +1584,54 @@ function renderLocationsPanel() {
     renderLocationsPanel();
     toast(`“${name}” added.`);
     scheduleSync();
+  });
+
+  $$('#locations-panel .location-edit').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      editingBookcase = btn.closest('.location-row').dataset.id;
+      renderLocationsPanel();
+      $('#locations-panel .location-edit-name').focus();
+    });
+  });
+
+  $$('#locations-panel .location-cancel').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      editingBookcase = null;
+      renderLocationsPanel();
+    });
+  });
+
+  $$('#locations-panel .location-save').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const row = btn.closest('.location-row');
+      const id = row.dataset.id;
+      const bc = cases.find((b) => b.id === id);
+      const name = row.querySelector('.location-edit-name').value.trim();
+      const shelves = Math.max(1, Math.min(50, parseInt(row.querySelector('.location-edit-shelves').value, 10) || bc.shelves));
+      if (!name) { toast('Give the bookcase a name.'); return; }
+
+      // Shrinking the case can strand items on shelves that no longer
+      // exist — confirm, then clear just those shelf numbers.
+      const stranded = shelves < bc.shelves
+        ? items.filter((i) => i.bookcaseId === id && Number(i.shelf) > shelves)
+        : [];
+      if (stranded.length && !confirm(
+        `“${name}” will have ${shelves} shel${shelves === 1 ? 'f' : 'ves'}, but ` +
+        `${stranded.length} item${stranded.length === 1 ? ' is' : 's are'} on higher shelves. ` +
+        `Keep the item${stranded.length === 1 ? '' : 's'} in the bookcase but clear ` +
+        `${stranded.length === 1 ? 'its' : 'their'} shelf number?`)) return;
+
+      saveBookcases(cases.map((b) => (b.id === id ? { ...b, name, shelves } : b)));
+      for (const item of stranded) {
+        item.shelf = '';
+        item.updatedAt = new Date().toISOString();
+        await putItem(item);
+      }
+      editingBookcase = null;
+      renderLocationsPanel();
+      toast(bc.name !== name ? `Renamed — “${name}” now shows everywhere.` : 'Saved.');
+      scheduleSync();
+    });
   });
 
   $$('#locations-panel .location-remove').forEach((btn) => {
