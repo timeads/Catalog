@@ -24,6 +24,7 @@ let currentView = 'home';
 let detailSelectedPhoto = null; // photo id highlighted on the detail page
 const photoUrls = new Map(); // photo id (or item id, legacy) -> object URL
 
+let pendingReload = false; // a new app version is ready; apply when safe
 let viewMode = 'grid'; // library layout: 'grid' | 'list'
 try { viewMode = localStorage.getItem('stacks-view') === 'list' ? 'list' : 'grid'; } catch {}
 
@@ -170,6 +171,13 @@ function route() {
   if (view === 'scan') beginScan();
   if (view === 'settings') renderSettings();
   if (view !== 'form' && view !== 'scan') draft = null;
+
+  // A new app version that arrived mid-session applies on the next
+  // navigation, so it never interrupts typing or scanning.
+  if (pendingReload && view !== 'form' && view !== 'scan') {
+    location.reload();
+    return;
+  }
 
   currentView = view;
   views[view].hidden = false;
@@ -1639,7 +1647,21 @@ async function startApp() {
   renderSyncIndicators();
   route();
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+    const hadController = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.register('sw.js').catch(() => {});
+    // When an update finishes installing mid-session, refresh so the new
+    // version shows without waiting for a manual close-and-reopen —
+    // immediately on passive views, deferred if a form or scan is open.
+    let refreshed = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!hadController || refreshed) return; // first install: already fresh
+      refreshed = true;
+      if (currentView === 'form' || currentView === 'scan') {
+        pendingReload = true;
+      } else {
+        location.reload();
+      }
+    });
   }
   if (getSyncConfig() && navigator.onLine !== false) runSync('startup');
 }
