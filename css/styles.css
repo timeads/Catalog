@@ -1696,3 +1696,32 @@ body.is-locked .toast { display: none !important; }
 @media (min-width: 900px) {
   .toast { bottom: 24px; }
 }
+
+/* ---------- desktop width consistency ---------- */
+/* On larger screens every view's primary content fills the same 980px
+   container the Home page uses. Prose notes keep their reading measure;
+   everything structural goes edge to edge. */
+@media (min-width: 900px) {
+  .panel,
+  .mood-form,
+  .mood-list,
+  .online-form,
+  .result-list,
+  .scan-manual,
+  .archive-grid,
+  .item-form { max-width: none; }
+
+  .scanner-frame { max-width: 720px; }
+
+  .backup-actions {
+    max-width: none;
+    grid-template-columns: repeat(3, minmax(0, 220px));
+  }
+
+  /* The form spreads into two columns; toggles, the cover editor, paired
+     field rows, long-text fields, and the actions keep the full row. */
+  .item-form { grid-template-columns: 1fr 1fr; column-gap: 18px; }
+  .item-form > * { grid-column: 1 / -1; }
+  .item-form > .field { grid-column: auto; }
+  .item-form > .field:has(textarea) { grid-column: 1 / -1; }
+}
