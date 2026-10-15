@@ -1,10 +1,11 @@
 // App lock: a per-device passphrase gate. The passphrase derives a key
-// (PBKDF2 → AES-GCM, WebCrypto) that encrypts the stored sync and Discogs
-// tokens, so they can't be lifted from the browser while locked. Unlock
-// lasts for the browser session. "Forgot" is a device reset — the local
-// copy is wiped and restored from the sync repo or a backup.
+// (PBKDF2 → AES-GCM, WebCrypto) that encrypts the login session and the
+// Discogs / Claude keys, so they can't be lifted from the browser while
+// locked. Unlock lasts for the browser session. "Forgot" is a device reset — the local
+// copy is wiped and restored from the account (sign in again) or a backup.
 
-import { getSyncConfig, setSyncConfig, overrideSyncConfig, removeStoredSyncConfig } from './sync.js';
+import { exportStoredSession, setSessionLocked, clearStoredSession } from './cloud.js';
+import { resetSyncState } from './sync.js';
 import { getDiscogsToken, setDiscogsToken, overrideDiscogsToken, removeStoredDiscogsToken } from './value.js';
 import { getVisionKey, setVisionKey, overrideVisionKey, removeStoredVisionKey } from './identify.js';
 
@@ -70,12 +71,14 @@ async function decrypt(key, box) {
 /* ---------------- secrets handling ---------------- */
 
 function collectSecrets() {
-  return JSON.stringify({ sync: getSyncConfig(), discogs: getDiscogsToken(), vision: getVisionKey() });
+  return JSON.stringify({ auth: exportStoredSession(), discogs: getDiscogsToken(), vision: getVisionKey() });
 }
 
 function applySecrets(json) {
   const s = JSON.parse(json);
-  overrideSyncConfig(s.sync || null);
+  // Bundles sealed before accounts existed carry a `sync` entry instead; it
+  // is simply dropped.
+  setSessionLocked(true, s.auth || null, () => { resealIfLocked(); });
   overrideDiscogsToken(s.discogs || '');
   overrideVisionKey(s.vision || '');
 }
@@ -84,7 +87,7 @@ function applySecrets(json) {
 async function sealSecrets(key, bundle) {
   bundle.secrets = await encrypt(key, collectSecrets());
   writeBundle(bundle);
-  removeStoredSyncConfig();
+  setSessionLocked(true, undefined, () => { resealIfLocked(); });
   removeStoredDiscogsToken();
   removeStoredVisionKey();
 }
@@ -132,7 +135,7 @@ export async function disableLock(pass) {
   if (!bundle) return true;
   if (!(await unlock(pass))) return false;
   // Write the secrets back as plaintext storage and drop the lock.
-  setSyncConfig(getSyncConfig());
+  setSessionLocked(false);
   setDiscogsToken(getDiscogsToken());
   setVisionKey(getVisionKey());
   localStorage.removeItem(LOCK_KEY);
@@ -175,16 +178,15 @@ export async function tryRestoreSession() {
 }
 
 // The escape hatch: wipe this device — lock, tokens, and the local catalog.
-// The collection stays in the sync repo and in any backups.
+// The collection stays in the account (synced) and in any backups.
 export async function resetDevice() {
   localStorage.removeItem(LOCK_KEY);
   sessionStorage.removeItem(SESSION_KEY);
-  removeStoredSyncConfig();
+  clearStoredSession();
   removeStoredDiscogsToken();
   removeStoredVisionKey();
-  for (const k of ['stacks-sync-covers', 'stacks-sync-last', 'stacks-tombstones', 'stacks-token-meta']) {
-    localStorage.removeItem(k);
-  }
+  resetSyncState();
+  localStorage.removeItem('stacks-token-meta');
   await new Promise((resolve) => {
     const req = indexedDB.deleteDatabase('stacks-catalog');
     req.onsuccess = req.onerror = req.onblocked = () => resolve();

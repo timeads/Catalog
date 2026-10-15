@@ -2,7 +2,11 @@ import { getAllItems, putItem, deleteItem, newItem, newPhoto, migrateItem } from
 import { lookupBarcode, searchBooks, searchRecords, fetchReleaseDetails, fetchBookDescription, findArchivePhotos } from './lookup.js';
 import { getVisionKey, setVisionKey, identifyPhoto, enrichItem, recommendPicks } from './identify.js';
 import { startScanner } from './scanner.js';
-import { getSyncConfig, setSyncConfig, lastSyncedAt, recordTombstone, syncNow, markTokenUpdated } from './sync.js';
+import { lastSyncedAt, recordTombstone, syncNow, markTokenUpdated, getDeviceOwner, resetSyncState } from './sync.js';
+import {
+  cloudConfigured, currentUser, onAuthChange, isAuthCallback,
+  signIn, signUp, sendPasswordReset, setNewPassword, signOut,
+} from './cloud.js';
 import { getDiscogsToken, setDiscogsToken, parseValue, fmtMoney, marketLinks, discogsStats } from './value.js';
 import {
   isLockEnabled, unlock, enableLock, disableLock, changePassphrase,
@@ -28,9 +32,6 @@ let editingBookcase = null; // bookcase id being edited in Settings
 const photoUrls = new Map(); // photo id (or item id, legacy) -> object URL
 
 let pendingReload = false; // a new app version is ready; apply when safe
-
-// Prefilled in the sync setup so a new device only needs the token pasted.
-const DEFAULT_SYNC_REPO = 'timeads/stacks-data';
 let viewMode = 'grid'; // library layout: 'grid' | 'list'
 try { viewMode = localStorage.getItem('stacks-view') === 'list' ? 'list' : 'grid'; } catch {}
 let homeViewMode = 'grid'; // Recently-added layout on Home
@@ -1205,9 +1206,12 @@ async function onDetailPhotosPicked(ev) {
   toast(`Added ${files.length} photo${files.length === 1 ? '' : 's'}.`);
 }
 
-/* ---------------- sync ---------------- */
+/* ---------------- account & sync ---------------- */
 
-let syncUiState = { status: getSyncConfig() ? 'idle' : 'off', text: '' };
+let account = null; // signed-in user ({id, email, …}) or null
+let authMode = 'signin'; // signed-out panel: 'signin' | 'signup' | 'reset' | 'sent' | 'recovery'
+let sentNote = '';
+let syncUiState = { status: 'off', text: '' };
 let syncDebounce = null;
 
 function fmtSyncTime(iso) {
@@ -1218,30 +1222,29 @@ function fmtSyncTime(iso) {
 }
 
 function renderSyncIndicators() {
-  const cfg = getSyncConfig();
   const last = lastSyncedAt();
   let dot = 'off';
-  let text = 'Sync off';
-  if (cfg) {
+  let text = 'Not signed in';
+  if (account) {
     if (syncUiState.status === 'syncing') { dot = ''; text = syncUiState.text || 'Syncing…'; }
     else if (syncUiState.status === 'error') { dot = 'err'; text = 'Sync issue'; }
     else { dot = ''; text = last ? `Synced ${fmtSyncTime(last)}` : 'Ready to sync'; }
   }
   const html = `<span class="sync-dot ${dot}"></span>${esc(text)}`;
-  $('#top-sync').innerHTML = cfg ? html : '';
+  $('#top-sync').innerHTML = account ? html : '';
   const side = $('#side-sync');
-  side.hidden = false;
-  side.innerHTML = cfg ? html : `<span class="sync-dot off"></span>Sync off — <a href="#/settings">set up</a>`;
+  side.hidden = !cloudConfigured();
+  side.innerHTML = account ? html : `<span class="sync-dot off"></span>Not signed in · <a href="#/settings">sign in</a>`;
 }
 
 function scheduleSync() {
-  if (!getSyncConfig()) return;
+  if (!account) return;
   clearTimeout(syncDebounce);
   syncDebounce = setTimeout(() => runSync('auto'), 2500);
 }
 
 async function runSync(reason) {
-  if (!getSyncConfig()) return;
+  if (!account) return;
   syncUiState = { status: 'syncing', text: 'Syncing…' };
   renderSyncIndicators();
   try {
@@ -1255,7 +1258,6 @@ async function runSync(reason) {
       // on, and let the settings panels reflect the new state.
       await resealIfLocked();
       discogsCache.clear();
-      if (currentView === 'settings') renderSettings();
     }
     if (result && result.applied) {
       items = await getAllItems();
@@ -1270,70 +1272,242 @@ async function runSync(reason) {
     syncUiState = { status: 'error', text: err.message || 'Sync failed' };
     renderSyncIndicators();
     if (currentView === 'settings') renderSettings();
-    if (reason === 'manual') toast(err.message || 'Sync failed.');
+    if (reason === 'manual' || reason === 'signin') toast(err.message || 'Sync failed.');
   }
+}
+
+// Forget this device's copy of the catalog (items, bookcases, keys) — when
+// a different account signs in here, or on "sign out and remove".
+async function wipeLocalCatalog() {
+  for (const item of items) await deleteItem(item.id);
+  items = [];
+  for (const u of photoUrls.values()) URL.revokeObjectURL(u);
+  photoUrls.clear();
+  try { localStorage.removeItem('stacks-bookcases'); } catch {}
+  try { localStorage.removeItem('stacks-token-meta'); } catch {}
+  setDiscogsToken('');
+  setVisionKey('');
+  discogsCache.clear();
+  resetSyncState();
+  await resealIfLocked();
+  updateNavCount();
+  rerender();
+}
+
+// A user just signed in (or was already signed in at startup): make sure
+// this device's catalog belongs to them, then sync.
+let adopting = null; // user id being adopted (sign-in and its auth event race)
+
+async function adoptAccount(user, reason) {
+  if (!user || adopting === user.id) return;
+  adopting = user.id;
+  try {
+    await adoptAccountNow(user, reason);
+  } finally {
+    adopting = null;
+  }
+}
+
+async function adoptAccountNow(user, reason) {
+  const owner = getDeviceOwner();
+  if (owner && owner !== user.id) {
+    if (items.length) {
+      const ok = confirm(`This device holds a catalog from a different account (${items.length} item${items.length === 1 ? '' : 's'}).\n\nReplace it with ${user.email}'s catalog? Cancel signs back out and leaves it untouched.`);
+      if (!ok) {
+        await signOut();
+        account = null;
+        renderSyncIndicators();
+        if (currentView === 'settings') renderSettings();
+        return;
+      }
+    }
+    await wipeLocalCatalog();
+  }
+  account = user;
+  syncUiState = { status: 'idle', text: '' };
+  renderSyncIndicators();
+  if (currentView === 'settings') renderSettings();
+  if (navigator.onLine !== false) await runSync(reason);
+}
+
+function handleAuthEvent(event, session) {
+  // Supabase asks that no awaited calls run inside this callback.
+  setTimeout(async () => {
+    if (event === 'PASSWORD_RECOVERY') {
+      account = session ? session.user : account;
+      authMode = 'recovery';
+      location.hash = '#/settings';
+      renderSettings();
+      return;
+    }
+    if (event === 'SIGNED_IN' && session && (!account || account.id !== session.user.id)) {
+      await adoptAccount(session.user, 'signin');
+    } else if (event === 'SIGNED_OUT') {
+      account = null;
+      syncUiState = { status: 'off', text: '' };
+      renderSyncIndicators();
+      if (currentView === 'settings') renderSettings();
+    } else if ((event === 'USER_UPDATED' || event === 'TOKEN_REFRESHED') && session) {
+      account = session.user;
+    }
+  }, 0);
+}
+
+function renderAccountPanel() {
+  const panel = $('#sync-panel');
+
+  if (!cloudConfigured()) {
+    panel.innerHTML = `<p class="aside-note">Accounts aren't switched on in this version of the app yet. Your catalog is saved on this device; use Backup &amp; export below to keep a copy.</p>`;
+    return;
+  }
+
+  if (authMode === 'recovery') {
+    panel.innerHTML = `
+      <p class="aside-note">Choose a new password for ${esc(account ? account.email : 'your account')}.</p>
+      <form id="recovery-form" class="account-form">
+        <label class="field">
+          <span class="field-label">New password <em>at least 8 characters</em></span>
+          <input id="recovery-pass" type="password" autocomplete="new-password" minlength="8" required>
+        </label>
+        <div class="form-actions"><button class="btn btn-accent" type="submit">Save password</button></div>
+      </form>`;
+    $('#recovery-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const pass = $('#recovery-pass').value;
+      if (pass.length < 8) { toast('Use a password of at least 8 characters.'); return; }
+      try {
+        await setNewPassword(pass);
+        authMode = 'signin';
+        toast('Password updated.');
+        const user = await currentUser();
+        if (user) await adoptAccount(user, 'signin');
+        else renderSettings();
+      } catch (err) { toast(err.message); }
+    });
+    return;
+  }
+
+  if (account) {
+    const last = lastSyncedAt();
+    panel.innerHTML = `
+      <div class="sync-status-row">
+        <span class="sync-account">${esc(account.email || '')}</span>
+        <span class="sync-note">${syncUiState.status === 'error' ? esc(syncUiState.text)
+          : syncUiState.status === 'syncing' ? 'Syncing…'
+          : last ? `Last synced ${esc(fmtSyncTime(last))}` : 'Not synced yet'}</span>
+      </div>
+      <p class="sync-note">Signed in. Your catalog syncs automatically when the app opens, after every change, and when you come back online. Sign in with the same account on your other devices and they'll stay matching.</p>
+      <div class="form-actions">
+        <button id="sync-now" class="btn btn-accent" type="button">Sync now</button>
+        <button id="sign-out" class="btn btn-quiet" type="button">Sign out</button>
+      </div>
+      <button id="sign-out-wipe" class="clear-link" type="button">Sign out and remove this device's copy</button>`;
+    $('#sync-now').addEventListener('click', () => runSync('manual'));
+    $('#sign-out').addEventListener('click', async () => {
+      if (!confirm('Sign out on this device? The catalog stays here and in your account.')) return;
+      await signOut();
+      account = null;
+      renderSettings();
+      renderSyncIndicators();
+    });
+    $('#sign-out-wipe').addEventListener('click', async () => {
+      if (!confirm('Sign out and remove the catalog from this device? Everything that has synced stays in your account; sign in again to bring it back.')) return;
+      await signOut();
+      account = null;
+      await wipeLocalCatalog();
+      renderSettings();
+      renderSyncIndicators();
+      toast('Signed out. This device’s copy is removed.');
+    });
+    return;
+  }
+
+  if (authMode === 'sent') {
+    panel.innerHTML = `
+      <p class="aside-note">${esc(sentNote)}</p>
+      <div class="form-actions"><button id="auth-back" class="btn btn-quiet" type="button">Back to sign in</button></div>`;
+    $('#auth-back').addEventListener('click', () => { authMode = 'signin'; renderSettings(); });
+    return;
+  }
+
+  const signup = authMode === 'signup';
+  const reset = authMode === 'reset';
+  panel.innerHTML = `
+    <p class="aside-note">${reset
+      ? 'Enter your account email and we’ll send a link to choose a new password.'
+      : 'Sign in to keep your catalog the same on every device. Each account’s collection is private to it.'}</p>
+    ${reset ? '' : `
+    <div class="kind-filter" role="group" aria-label="Sign in or create an account">
+      <button type="button" class="seg-btn${signup ? '' : ' is-active'}" data-authmode="signin">Sign in</button>
+      <button type="button" class="seg-btn${signup ? ' is-active' : ''}" data-authmode="signup">Create account</button>
+    </div>`}
+    <form id="auth-form" class="account-form">
+      <label class="field">
+        <span class="field-label">Email</span>
+        <input id="auth-email" type="email" autocomplete="email" inputmode="email" required>
+      </label>
+      ${reset ? '' : `
+      <label class="field">
+        <span class="field-label">Password${signup ? ' <em>at least 8 characters</em>' : ''}</span>
+        <input id="auth-pass" type="password" autocomplete="${signup ? 'new-password' : 'current-password'}" required>
+      </label>`}
+      <div class="form-actions">
+        <button class="btn btn-accent" type="submit">${reset ? 'Send reset link' : signup ? 'Create account' : 'Sign in'}</button>
+        ${reset ? '<button id="auth-cancel" class="btn btn-quiet" type="button">Cancel</button>' : ''}
+      </div>
+    </form>
+    ${signup ? '<p class="sync-note">New accounts start syncing once the app’s owner approves the email.</p>' : ''}
+    ${!signup && !reset ? '<button id="auth-forgot" class="clear-link" type="button">Forgot password?</button>' : ''}`;
+
+  $$('#sync-panel [data-authmode]').forEach((b) => b.addEventListener('click', () => {
+    authMode = b.dataset.authmode;
+    renderSettings();
+  }));
+  const forgot = $('#auth-forgot');
+  if (forgot) forgot.addEventListener('click', () => { authMode = 'reset'; renderSettings(); });
+  const cancel = $('#auth-cancel');
+  if (cancel) cancel.addEventListener('click', () => { authMode = 'signin'; renderSettings(); });
+
+  $('#auth-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const email = $('#auth-email').value.trim();
+    const pass = reset ? '' : $('#auth-pass').value;
+    const btn = $('#auth-form button[type="submit"]');
+    if (!/^\S+@\S+\.\S+$/.test(email)) { toast('Enter a valid email.'); return; }
+    if (signup && pass.length < 8) { toast('Use a password of at least 8 characters.'); return; }
+    btn.disabled = true;
+    try {
+      if (reset) {
+        await sendPasswordReset(email);
+        sentNote = `If ${email} has an account, a reset link is on its way. Open it on this device to choose a new password.`;
+        authMode = 'sent';
+        renderSettings();
+      } else if (signup) {
+        const { needsConfirmation } = await signUp(email, pass);
+        if (needsConfirmation) {
+          sentNote = `Almost there: we sent a confirmation link to ${email}. Open it, then come back here and sign in.`;
+          authMode = 'sent';
+          renderSettings();
+        } else {
+          await adoptAccount(await currentUser(), 'signin');
+        }
+      } else {
+        const user = await signIn(email, pass);
+        await adoptAccount(user, 'signin');
+        toast(`Signed in as ${user.email}.`);
+      }
+    } catch (err) {
+      toast(err.message);
+    } finally {
+      btn.disabled = false;
+    }
+  });
 }
 
 /* ---------------- settings ---------------- */
 
 function renderSettings() {
-  const cfg = getSyncConfig();
-  const panel = $('#sync-panel');
-  if (cfg) {
-    const last = lastSyncedAt();
-    panel.innerHTML = `
-      <div class="sync-status-row">
-        <span class="sync-repo">${esc(cfg.repo)}</span>
-        <span class="sync-note">${syncUiState.status === 'error' ? esc(syncUiState.text)
-          : syncUiState.status === 'syncing' ? 'Syncing…'
-          : last ? `Last synced ${esc(fmtSyncTime(last))}` : 'Not synced yet'}</span>
-      </div>
-      <p class="sync-note">Syncs automatically when the app opens, after every change, and when you come back online. Set up the same repo and token on your other devices and they'll stay matching.</p>
-      <div class="form-actions">
-        <button id="sync-now" class="btn btn-accent" type="button">Sync now</button>
-        <button id="sync-disconnect" class="btn btn-danger" type="button">Disconnect</button>
-      </div>`;
-    $('#sync-now').addEventListener('click', () => runSync('manual'));
-    $('#sync-disconnect').addEventListener('click', async () => {
-      if (!confirm('Stop syncing on this device? Your catalog stays here and in the repo.')) return;
-      setSyncConfig(null);
-      await resealIfLocked();
-      syncUiState = { status: 'off', text: '' };
-      renderSettings();
-      renderSyncIndicators();
-    });
-  } else {
-    panel.innerHTML = `
-      <p class="aside-note">Your catalog syncs through a private GitHub repository you own — free, and the data stays yours. One-time setup on each device:</p>
-      <ol class="setup-steps">
-        <li>Create a <strong>private repo</strong> on GitHub, e.g. <code>stacks-data</code> (empty is fine).</li>
-        <li>Create a <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">fine-grained access token</a>: choose <em>Only select repositories</em> → that repo, and under Repository permissions set <strong>Contents</strong> to <strong>Read and write</strong>.</li>
-        <li>Paste the token below. On your other device, install the app and paste the same token.</li>
-      </ol>
-      <label class="field">
-        <span class="field-label">Repository <em>owner/name</em></span>
-        <input id="sync-repo-input" type="text" autocomplete="off" placeholder="yourname/stacks-data" value="${esc(DEFAULT_SYNC_REPO)}">
-      </label>
-      <label class="field">
-        <span class="field-label">Access token</span>
-        <input id="sync-token-input" type="password" autocomplete="off" placeholder="github_pat_…">
-      </label>
-      <div class="form-actions">
-        <button id="sync-connect" class="btn btn-accent" type="button">Connect &amp; sync</button>
-      </div>
-      <p class="sync-note">The token is stored only in this browser and sent only to api.github.com.</p>`;
-    $('#sync-connect').addEventListener('click', async () => {
-      const repo = $('#sync-repo-input').value.trim().replace(/^https:\/\/github\.com\//, '');
-      const token = $('#sync-token-input').value.trim();
-      if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) { toast('Repository should look like owner/name.'); return; }
-      if (!token) { toast('Paste the access token.'); return; }
-      setSyncConfig({ repo, token });
-      await resealIfLocked();
-      renderSettings();
-      renderSyncIndicators();
-      await runSync('manual');
-    });
-  }
+  renderAccountPanel();
 
   renderLocationsPanel();
   renderDiscogsPanel();
@@ -1373,7 +1547,7 @@ function renderDiscogsPanel() {
       <div class="form-actions">
         <button id="discogs-save" class="btn btn-accent" type="button">Save token</button>
       </div>
-      <p class="sync-note">Sent only to api.discogs.com. With device sync on, the token travels to your other devices through your private data repo.</p>`;
+      <p class="sync-note">Sent only to api.discogs.com. When you’re signed in, the token follows you to your other devices through your private account.</p>`;
     $('#discogs-save').addEventListener('click', async () => {
       const token = $('#discogs-token-input').value.trim();
       if (!token) { toast('Paste the token first.'); return; }
@@ -1773,7 +1947,7 @@ function renderVisionPanel() {
       <div class="form-actions">
         <button id="vision-save" class="btn btn-accent" type="button">Save key</button>
       </div>
-      <p class="sync-note">Sent only to api.anthropic.com along with the photo (stored encrypted when the app lock is on). With device sync on, the key travels to your other devices through your private data repo.</p>`;
+      <p class="sync-note">Sent only to api.anthropic.com along with the photo (stored encrypted when the app lock is on). When you’re signed in, the key follows you to your other devices through your private account.</p>`;
     $('#vision-save').addEventListener('click', async () => {
       const key = $('#vision-key-input').value.trim();
       if (!key) { toast('Paste the API key first.'); return; }
@@ -1791,7 +1965,7 @@ function renderLockPanel() {
   const panel = $('#lock-panel');
   if (isLockEnabled()) {
     panel.innerHTML = `
-      <p class="sync-note">App lock is on. Opening the app on this device asks for the passphrase, and the sync and Discogs tokens are stored encrypted with it.</p>
+      <p class="sync-note">App lock is on. Opening the app on this device asks for the passphrase, and your sign-in and the Discogs / Claude keys are stored encrypted with it.</p>
       <label class="field">
         <span class="field-label">Current passphrase</span>
         <input id="lock-current" type="password" autocomplete="current-password">
@@ -1817,7 +1991,7 @@ function renderLockPanel() {
     });
   } else {
     panel.innerHTML = `
-      <p class="aside-note">Require a passphrase to open the app on this device. It also encrypts the stored sync and Discogs tokens. Each person sets their own passphrase on their own device — and if it's forgotten, the way back in is a device reset (the collection stays safe in the sync repo and backups).</p>
+      <p class="aside-note">Require a passphrase to open the app on this device. It also encrypts your sign-in and the Discogs / Claude keys. Each person sets their own passphrase on their own device — and if it's forgotten, the way back in is a device reset (the collection stays safe in your account and backups).</p>
       <label class="field">
         <span class="field-label">Passphrase</span>
         <input id="lock-pass-1" type="password" autocomplete="new-password">
@@ -1855,8 +2029,20 @@ async function startApp() {
   }
   bindEvents();
   updateNavCount();
+  // An email link (confirm account, reset password) lands with its tokens in
+  // the URL fragment: let the account layer consume it before routing.
+  let authCallbackError = '';
+  if (cloudConfigured()) {
+    onAuthChange(handleAuthEvent);
+    if (isAuthCallback()) {
+      authCallbackError = new URLSearchParams(location.hash.slice(1)).get('error_description') || '';
+      try { account = await currentUser(); } catch {}
+      history.replaceState(null, '', location.pathname + location.search + '#/settings');
+    }
+  }
   renderSyncIndicators();
   route();
+  if (authCallbackError) toast(`That link didn’t work: ${authCallbackError}. Request a new one.`);
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     const hadController = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.register('sw.js').catch(() => {});
@@ -1874,7 +2060,10 @@ async function startApp() {
       }
     });
   }
-  if (getSyncConfig() && navigator.onLine !== false) runSync('startup');
+  if (cloudConfigured()) {
+    const user = account || await currentUser().catch(() => null);
+    if (user) adoptAccount(user, 'startup');
+  }
 }
 
 /* ---------------- appearance ---------------- */

@@ -1,0 +1,31 @@
+# Free Supabase projects pause after about a week with no activity, which
+# would quietly stop sync. This touches the database every three days.
+# The project URL and publishable key are read from js/cloud.js (both are
+# public by design; row-level security protects the data, so this anonymous
+# read returns an empty list).
+name: Keep Supabase awake
+
+on:
+  schedule:
+    - cron: '17 9 */3 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ping the project
+        run: |
+          URL=$(grep -oP "SUPABASE_URL = '\K[^']+" js/cloud.js || true)
+          KEY=$(grep -oP "SUPABASE_KEY = '\K[^']+" js/cloud.js || true)
+          if [ -z "$URL" ] || [ -z "$KEY" ]; then
+            echo "Supabase isn't configured in js/cloud.js yet; nothing to ping."
+            exit 0
+          fi
+          curl -fsS "$URL/rest/v1/items?select=id&limit=1" \
+            -H "apikey: $KEY" -H "Authorization: Bearer $KEY"
+          echo

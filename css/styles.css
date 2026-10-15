@@ -1459,7 +1459,6 @@ input:focus, textarea:focus, select:focus {
   flex-wrap: wrap;
 }
 
-.sync-repo { font-family: var(--font-mono); font-size: var(--fs-meta); }
 
 .sync-note { font-size: var(--fs-meta); color: var(--ink-3); }
 
@@ -1725,3 +1724,13 @@ body.is-locked .toast { display: none !important; }
   .item-form > .field { grid-column: auto; }
   .item-form > .field:has(textarea) { grid-column: 1 / -1; }
 }
+
+/* ---------- account ---------- */
+
+.account-form { display: grid; gap: 12px; margin-top: 12px; }
+
+#sync-panel .kind-filter { margin-top: 4px; }
+
+#sync-panel .clear-link { margin-top: 10px; }
+
+.sync-account { font-weight: 600; font-size: var(--fs-meta); overflow-wrap: anywhere; }

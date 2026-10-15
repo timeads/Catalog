@@ -49,48 +49,71 @@ own.
   show the live lowest asking price and copies-for-sale count. Store an
   estimated value per item and the Home screen totals the collection
   (values also export in the CSV — handy for insurance).
-- **Sync between devices** (optional): phone and desktop stay matching
-  through a private GitHub repository — see below.
+- **Accounts & sync**: sign in on each device and the catalog stays
+  matching everywhere; each person's collection is private — see below.
 - **App lock** (optional): a per-device passphrase gates the app and
-  encrypts the stored sync/Discogs tokens (WebCrypto, PBKDF2 + AES-GCM).
-  Unlock lasts for the browser session; a forgotten passphrase means
-  resetting the device copy (the collection stays in the sync repo and
-  backups). Each user sets their own passphrase on their own device.
+  encrypts the stored sign-in and Discogs / Claude keys (WebCrypto,
+  PBKDF2 + AES-GCM). Unlock lasts for the browser session; a forgotten
+  passphrase means resetting the device copy (the collection stays in the
+  account and backups). A household can use one shared passphrase — set
+  the same one on each device.
 - **Backup & export**: one-tap JSON backup (covers included) and CSV export.
 - **Works offline**: app shell cached by a service worker, catalog in
   IndexedDB. Only lookups and sync need a connection.
 
 **On repo visibility:** this code repo can stay public — it contains no
 secrets or data, and GitHub Pages on free accounts requires a public repo.
-The privacy boundary is the *data* repo used for sync: keep that one
-private. The app URL itself serves an empty app to strangers; each
-visitor's browser has its own storage.
+The Supabase URL and publishable key in `js/cloud.js` are public by design;
+row-level security keeps every account's catalog private, and only approved
+emails can store anything.
 
-No accounts, no server, no build step — plain HTML/CSS/JS. The only vendored
-dependency is [ZXing](https://github.com/zxing-js/library) for barcode
-decoding on browsers without the native `BarcodeDetector` API.
+No build step — plain HTML/CSS/JS. Vendored dependencies:
+[ZXing](https://github.com/zxing-js/library) for barcode decoding on
+browsers without the native `BarcodeDetector` API, and
+[supabase-js](https://github.com/supabase/supabase-js) for accounts and sync.
 
-## Sync setup (once per device)
+## Accounts & sync
 
-1. Create a **private repo** on GitHub (e.g. `stacks-data`); empty is fine.
-2. Create a [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new):
-   *Only select repositories* → that repo, and under Repository permissions
-   set **Contents → Read and write**.
-3. In the app: **Settings → Sync between devices**, paste the repo
-   (`owner/name`) and the token, hit **Connect & sync**. Repeat on the
-   other device with the same two values.
+Each person signs in with an email and password (**Settings → Account &
+sync**). Their catalog, photos, bookcases, and optional Discogs / Claude
+keys follow them to every device they sign in on. Accounts are private to
+each other, and the app stays local-first: every device keeps a full copy
+and works offline, syncing on open, a couple of seconds after every change,
+and when it comes back online. Merges are per item (newest edit wins, also
+enforced server-side) and deletions propagate.
 
-The app then syncs automatically on open, a couple of seconds after every
-change, and when the browser comes back online. Merges are per-item (newest
-edit wins) and deletions propagate. The repo ends up holding `catalog.json`
-plus `covers/*.jpg`, so it doubles as another backup. The token is stored
-only in the browser's local storage and sent only to `api.github.com`.
+**Approving people.** Anyone can create an account, but nothing syncs until
+their email is on the allow-list. Add one in the Supabase dashboard's SQL
+editor:
 
-The optional Discogs token and Claude API key also sync through the data
-repo (stored inside `catalog.json` — private, and only readable with the
-GitHub token anyway), so pasting them once is enough. The GitHub token
-itself never syncs: it's the credential that unlocks the repo, so each
-device needs it pasted once.
+```sql
+insert into public.allowed_emails (email) values ('friend@example.com');
+```
+
+**Shared devices.** If a different account signs in on a device that holds
+someone else's catalog, the app asks before replacing it, so two people's
+collections never mix. *Sign out and remove this device's copy* clears a
+device completely.
+
+### Backend setup (one time)
+
+1. Create a Supabase project (free plan is plenty).
+2. Apply `supabase/migrations/20261015120000_stacks_schema.sql` (SQL editor
+   or `supabase db push`). It creates the tables, row-level security,
+   the allow-list, and the private `covers` photo bucket.
+3. Authentication → URL Configuration: set **Site URL** to the app's address
+   (e.g. `https://timeads.github.io/Catalog/`) and add it to the redirect
+   allow-list, so confirmation and password-reset emails return to the app.
+4. Put the project URL and publishable key in `js/cloud.js`.
+5. Add your email(s) to `public.allowed_emails`.
+
+The **Keep Supabase awake** workflow touches the database every three days,
+so the free project doesn't pause from inactivity.
+
+**Coming from the GitHub-repo sync?** Sign in on the device that has your
+full catalog first: on first sign-in it uploads everything, photos
+included. Then sign in on your other devices. The old data repo can stay as
+an archive.
 
 ## Getting it running
 
@@ -126,8 +149,11 @@ js/app.js             routing, rendering, state
 js/db.js              IndexedDB storage
 js/lookup.js          Open Library / Google Books / MusicBrainz lookups
 js/scanner.js         camera + BarcodeDetector, ZXing fallback
-js/sync.js            GitHub-repo sync (merge + tombstones + covers)
+js/sync.js            account sync (merge + tombstones + photos)
+js/cloud.js           Supabase client, sign-in, session storage
+supabase/migrations/  database schema + row-level security
 vendor/zxing.min.js   vendored @zxing/library UMD bundle (v0.21.3)
+vendor/supabase.js    vendored @supabase/supabase-js UMD bundle (v2.117.3)
 sw.js                 offline cache
 manifest.webmanifest  PWA install metadata
 icons/                app icons + logo

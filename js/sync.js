@@ -1,19 +1,29 @@
-// Automatic sync through a private GitHub repo the user owns.
-// The repo holds catalog.json (all metadata + tombstones) and covers/<id>.jpg.
-// Merge is per-item last-write-wins on updatedAt; deletions carry tombstones
-// so they propagate instead of resurrecting. Tokens stay in this browser.
+// Automatic sync through the person's own account (Supabase).
+// Local-first: every device keeps the full catalog in IndexedDB and works
+// offline; sync pulls what changed elsewhere, then pushes what changed here.
+// Merge is per-item newest-edit-wins on updatedAt (also enforced
+// server-side), deletions travel as tombstones, and photos live in private
+// storage under "<user id>/<item id>/<photo id>.jpg".
 
 import { getAllItems, putItem, deleteItem, migrateItem } from './db.js';
 import { getBookcasesBundle, adoptBookcasesBundle } from './locations.js';
 import { getDiscogsToken, setDiscogsToken } from './value.js';
 import { getVisionKey, setVisionKey } from './identify.js';
+import { cloud, currentUser } from './cloud.js';
 
-const CFG_KEY = 'stacks-sync-config';
-const COVERS_KEY = 'stacks-sync-covers'; // {itemId: {sha, ts}} pushed from this device
-const TOMB_KEY = 'stacks-tombstones'; // {itemId: deletedAtISO} local deletions
-const LAST_KEY = 'stacks-sync-last';
-const DATA_PATH = 'catalog.json';
-const TOMBSTONE_TTL_DAYS = 120;
+const TOMB_KEY = 'stacks-tombstones'; // {itemId: deletedAtISO} local deletions not yet pushed
+const LAST_KEY = 'stacks-sync-last'; // when this device last synced (for display)
+const CURSOR_KEY = 'stacks-cloud-cursor'; // newest server synced_at seen
+const PUSHED_KEY = 'stacks-cloud-pushed'; // {itemId: updatedAt} last version pushed or pulled
+const PHOTOS_KEY = 'stacks-cloud-photos'; // {path: 1} photos known to be in storage
+const OWNER_KEY = 'stacks-owner'; // account the local catalog belongs to
+const BUCKET = 'covers';
+const PULL_OVERLAP_MS = 10 * 60 * 1000; // re-read a little behind the cursor
+const PAGE = 1000;
+const PUSH_CHUNK = 200;
+
+// Keys the GitHub-repo sync used; cleared once accounts take over.
+const LEGACY_KEYS = ['stacks-sync-config', 'stacks-sync-covers'];
 
 function readJson(key, fallback) {
   try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; }
@@ -23,33 +33,9 @@ function writeJson(key, value) {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
 }
 
-// With the app lock on, the config lives encrypted in the lock bundle and
-// is provided at runtime instead of read from storage.
-let cfgOverride;
-
-export function overrideSyncConfig(cfg) {
-  cfgOverride = cfg;
-}
-
-export function removeStoredSyncConfig() {
-  localStorage.removeItem(CFG_KEY);
-}
-
-export function getSyncConfig() {
-  if (cfgOverride !== undefined) {
-    return cfgOverride && cfgOverride.token && cfgOverride.repo ? cfgOverride : null;
-  }
-  const cfg = readJson(CFG_KEY, null);
-  return cfg && cfg.token && cfg.repo ? cfg : null;
-}
-
-export function setSyncConfig(cfg) {
-  if (cfgOverride !== undefined) cfgOverride = cfg || null;
-  if (cfg) {
-    writeJson(CFG_KEY, cfg);
-  } else {
-    for (const k of [CFG_KEY, COVERS_KEY, LAST_KEY]) localStorage.removeItem(k);
-  }
+function ms(iso) {
+  const t = Date.parse(iso || '');
+  return Number.isFinite(t) ? t : 0;
 }
 
 export function lastSyncedAt() {
@@ -63,13 +49,29 @@ export function recordTombstone(id) {
   writeJson(TOMB_KEY, t);
 }
 
+/* ---------------- which account this device's catalog belongs to ---------------- */
+
+export function getDeviceOwner() {
+  return localStorage.getItem(OWNER_KEY) || '';
+}
+
+export function setDeviceOwner(userId) {
+  try { localStorage.setItem(OWNER_KEY, userId); } catch {}
+}
+
+// Forget everything sync knows about the server — for switching accounts or
+// after the local catalog was wiped, so the next sync starts clean.
+export function resetSyncState() {
+  for (const k of [CURSOR_KEY, PUSHED_KEY, PHOTOS_KEY, LAST_KEY, TOMB_KEY, OWNER_KEY, ...LEGACY_KEYS]) {
+    try { localStorage.removeItem(k); } catch {}
+  }
+}
+
 /* ---------------- token sync ---------------- */
 
-// The Discogs token and Claude key ride along in catalog.json so a second
-// device gets them without re-pasting — the repo is private, and reading it
-// already requires the GitHub token. The GitHub token itself never syncs
-// (it's the credential that unlocks the repo in the first place).
-// Per-token newest-change-wins; explicit removals propagate too.
+// The Discogs token and Claude key follow the person between devices via
+// their private user_state row. Per-token newest-change-wins; explicit
+// removals propagate too.
 
 const TOKEN_META_KEY = 'stacks-token-meta'; // {discogs: changedAtISO, vision: changedAtISO}
 const TOKEN_EPOCH = '2000-01-01T00:00:00.000Z'; // "existed before token sync did"
@@ -114,105 +116,21 @@ function adoptTokensBundle(remote) {
   return changed;
 }
 
-/* ---------------- GitHub contents API ---------------- */
+/* ---------------- item shape on the wire ---------------- */
 
-function fileUrl(cfg, path) {
-  return `https://api.github.com/repos/${cfg.repo}/contents/${path}`;
+function photoPath(itemId, photo) {
+  return `${itemId}/${photo.id}.jpg`;
 }
 
-function headers(cfg, extra = {}) {
-  return {
-    Authorization: `Bearer ${cfg.token}`,
-    Accept: 'application/vnd.github+json',
-    'X-GitHub-Api-Version': '2022-11-28',
-    ...extra,
-  };
-}
-
-function b64ToText(b64) {
-  const bytes = Uint8Array.from(atob(b64.replace(/\s/g, '')), (c) => c.charCodeAt(0));
-  return new TextDecoder().decode(bytes);
-}
-
-function textToB64(text) {
-  const bytes = new TextEncoder().encode(text);
-  let bin = '';
-  for (let i = 0; i < bytes.length; i += 0x8000) {
-    bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  }
-  return btoa(bin);
-}
-
-function blobToB64(blob) {
-  return new Promise((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => resolve(String(r.result).split(',')[1]);
-    r.onerror = () => reject(r.error);
-    r.readAsDataURL(blob);
-  });
-}
-
-async function readRemoteCatalog(cfg) {
-  const res = await fetch(fileUrl(cfg, DATA_PATH), { headers: headers(cfg), cache: 'no-store' });
-  if (res.status === 404) return { data: null, sha: null };
-  if (res.status === 401 || res.status === 403) throw new Error('GitHub rejected the token — check its access to the repo.');
-  if (!res.ok) throw new Error(`Could not read from GitHub (${res.status}).`);
-  let body;
-  try { body = await res.json(); } catch { throw new Error('GitHub sent an unreadable response — try syncing again.'); }
-  let text;
-  if (body.encoding === 'none') {
-    // The catalog outgrew the 1 MB the contents API inlines — fetch it raw.
-    const raw = await fetch(fileUrl(cfg, DATA_PATH), {
-      headers: headers(cfg, { Accept: 'application/vnd.github.raw+json' }),
-      cache: 'no-store',
-    });
-    if (!raw.ok) throw new Error(`Could not read from GitHub (${raw.status}).`);
-    text = await raw.text();
-  } else {
-    text = b64ToText(body.content || '');
-  }
-  try {
-    return { data: JSON.parse(text), sha: body.sha };
-  } catch {
-    throw new Error('catalog.json in the sync repo is not readable — if it was edited by hand, delete it there and sync again.');
-  }
-}
-
-async function writeFile(cfg, path, base64, sha, message) {
-  const res = await fetch(fileUrl(cfg, path), {
-    method: 'PUT',
-    headers: headers(cfg),
-    cache: 'no-store',
-    body: JSON.stringify({ message, content: base64, ...(sha ? { sha } : {}) }),
-  });
-  if (res.status === 409 || res.status === 422) return null; // caller retries with a fresh sha
-  if (!res.ok) throw new Error(`Could not write to GitHub (${res.status}).`);
-  try { return (await res.json()).content; } catch { return { sha: null }; } // write landed; sha unknown
-}
-
-async function fetchRemoteSha(cfg, path) {
-  const res = await fetch(fileUrl(cfg, path), { headers: headers(cfg), cache: 'no-store' });
-  if (!res.ok) return null;
-  try { return (await res.json()).sha || null; } catch { return null; }
-}
-
-async function readFileBlob(cfg, path) {
-  const res = await fetch(fileUrl(cfg, path), {
-    headers: headers(cfg, { Accept: 'application/vnd.github.raw+json' }),
-    cache: 'no-store',
-  });
-  if (!res.ok) return null;
-  const blob = await res.blob();
-  return blob.size ? blob : null;
-}
-
-/* ---------------- merge ---------------- */
-
+// Strip image bytes; mark which photos have a stored file.
 function serialize(item) {
   const { coverBlob, ...rest } = item;
   return {
     ...rest,
-    photos: (item.photos || []).map(({ blob, ...p }) => p),
+    photos: (item.photos || []).map(({ blob, ...p }) => ({
+      ...p,
+      file: blob || p.file ? photoPath(item.id, p) : undefined,
+    })),
     hasCoverFile: !!coverBlob || !!item.hasCoverFile,
   };
 }
@@ -228,15 +146,14 @@ function graftPhotoBlobs(winner, local) {
   return winner;
 }
 
-function newerOf(a, b) {
-  return (a.updatedAt || '') >= (b.updatedAt || '') ? a : b;
-}
-
-function pruneTombstones(tombs) {
-  const cutoff = new Date(Date.now() - TOMBSTONE_TTL_DAYS * 864e5).toISOString();
-  const out = {};
-  for (const [id, ts] of Object.entries(tombs)) if (ts > cutoff) out[id] = ts;
-  return out;
+function cloudError(error, what) {
+  const m = String((error && error.message) || '');
+  if (/row-level security|permission denied/i.test(m)) {
+    return new Error('This account isn’t approved for Stacks yet. Ask the app’s owner to add your email.');
+  }
+  if (/jwt|token/i.test(m)) return new Error('Your sign-in expired. Sign in again.');
+  if (/fetch|network|failed to fetch/i.test(m)) return new Error('Couldn’t reach the server. Check your connection.');
+  return new Error(m ? `${what}: ${m}` : `${what} failed.`);
 }
 
 /* ---------------- sync ---------------- */
@@ -244,144 +161,169 @@ function pruneTombstones(tombs) {
 let syncing = false;
 let queued = false;
 
-// Returns {applied, pushed} or throws with a user-readable message.
-// onProgress(text) is optional.
+// Returns {applied, pushed, tokensAdopted} or throws with a user-readable
+// message. onProgress(text) is optional.
 export async function syncNow(onProgress = () => {}) {
-  const cfg = getSyncConfig();
-  if (!cfg) throw new Error('Sync is not set up yet.');
+  const sb = cloud();
+  if (!sb) throw new Error('Accounts aren’t set up in this version of the app.');
+  const user = await currentUser();
+  if (!user) throw new Error('Sign in to sync.');
   if (syncing) { queued = true; return { skipped: true }; }
   syncing = true;
   try {
-    for (let attempt = 0; attempt < 3; attempt++) {
-      onProgress('Syncing…');
-      const [{ data: remote, sha }, localItems] = await Promise.all([
-        readRemoteCatalog(cfg),
-        getAllItems(),
-      ]);
-      const remoteItems = new Map((remote?.items || []).map((i) => [i.id, i]));
-      const remoteTombs = remote?.deleted || {};
-      const localTombs = readJson(TOMB_KEY, {});
-      const tombs = pruneTombstones({ ...remoteTombs, ...localTombs });
-      const localMap = new Map(localItems.map((i) => [i.id, i]));
+    onProgress('Syncing…');
+    for (const k of LEGACY_KEYS) { try { localStorage.removeItem(k); } catch {} }
 
-      // Winner per id across both sides, then let newer tombstones erase.
-      const ids = new Set([...remoteItems.keys(), ...localMap.keys()]);
-      const merged = new Map();
-      for (const id of ids) {
-        const l = localMap.get(id);
-        const r = remoteItems.get(id);
-        const winner = l && r ? newerOf(l, r) : (l || r);
-        if (tombs[id] && tombs[id] > (winner.updatedAt || '')) continue;
-        merged.set(id, winner);
-      }
-
-      // Apply remote wins locally (grafting this device's image bytes back
-      // in), migrate old-shape items, and give every local-only photo its
-      // repo path before the catalog is serialized.
-      let applied = 0;
-      for (const [id, winner] of merged) {
-        const l = localMap.get(id);
-        let stored = winner;
-        let dirty = winner !== l;
-        if (dirty) {
-          stored = graftPhotoBlobs({ ...winner }, l);
-          delete stored.coverData;
-        }
-        if (migrateItem(stored)) dirty = true;
-        for (const p of stored.photos) {
-          if (p.blob && !p.file) { p.file = `covers/${id}/${p.id}.jpg`; dirty = true; }
-        }
-        if (dirty) {
-          await putItem(stored);
-          merged.set(id, stored);
-          if (winner !== l) applied++;
-        }
-        localMap.set(id, stored);
-      }
-      for (const item of localItems) {
-        if (!merged.has(item.id)) { await deleteItem(item.id); applied++; }
-      }
-
-      // Bookcase list: one bundle, newest edit wins.
-      if (adoptBookcasesBundle(remote?.bookcases)) applied++;
-
-      // Discogs/Claude tokens: adopt newer remote changes, then carry the
-      // result in the payload.
-      const tokensAdopted = adoptTokensBundle(remote?.tokens);
-      if (tokensAdopted) applied++;
-
-      // Push the merged catalog if it differs from what the remote had.
-      const payload = {
-        app: 'stacks',
-        version: 1,
-        updatedAt: new Date().toISOString(),
-        items: [...merged.values()].map(serialize),
-        deleted: tombs,
-        bookcases: getBookcasesBundle(),
-        tokens: tokensBundle(),
-      };
-      const remoteComparable = JSON.stringify({ items: (remote?.items || []), deleted: remoteTombs, bookcases: remote?.bookcases || { updatedAt: '', list: [] }, tokens: remote?.tokens || null });
-      const mergedComparable = JSON.stringify({ items: payload.items, deleted: payload.deleted, bookcases: payload.bookcases, tokens: payload.tokens });
-      let pushed = false;
-      if (remoteComparable !== mergedComparable) {
-        onProgress('Uploading catalog…');
-        const result = await writeFile(cfg, DATA_PATH, textToB64(JSON.stringify(payload)), sha,
-          `Sync catalog (${payload.items.length} items)`);
-        if (result === null) continue; // sha conflict: another device pushed — re-merge
-        pushed = true;
-      }
-
-      applied += await syncCovers(cfg, merged, localMap, onProgress);
-
-      writeJson(TOMB_KEY, tombs);
-      localStorage.setItem(LAST_KEY, new Date().toISOString());
-      return { applied, pushed, tokensAdopted };
+    const allowed = await sb.rpc('is_allowed');
+    if (allowed.error) throw cloudError(allowed.error, 'Sync');
+    if (!allowed.data) {
+      throw new Error('This account isn’t approved for Stacks yet. Ask the app’s owner to add your email.');
     }
-    throw new Error('Another device kept updating — try syncing again.');
+
+    const uid = user.id;
+    const pushed = readJson(PUSHED_KEY, {});
+    const tombs = readJson(TOMB_KEY, {});
+    const localItems = await getAllItems();
+    const localMap = new Map(localItems.map((i) => [i.id, i]));
+    let applied = 0;
+
+    // 1. Pull rows changed since the cursor (a little behind it, to be safe).
+    const cursor = localStorage.getItem(CURSOR_KEY) || '';
+    const since = cursor ? new Date(ms(cursor) - PULL_OVERLAP_MS).toISOString() : '';
+    let newest = cursor;
+    for (let from = 0; ; from += PAGE) {
+      let q = sb.from('items')
+        .select('id,data,deleted,updated_at,synced_at')
+        .order('synced_at', { ascending: true })
+        .range(from, from + PAGE - 1);
+      if (since) q = q.gt('synced_at', since);
+      const { data: rows, error } = await q;
+      if (error) throw cloudError(error, 'Downloading the catalog');
+      for (const row of rows) {
+        if (ms(row.synced_at) > ms(newest)) newest = row.synced_at;
+        const l = localMap.get(row.id);
+        const remoteTs = ms(row.updated_at);
+        if (row.deleted) {
+          if (l && ms(l.updatedAt) <= remoteTs) {
+            await deleteItem(row.id);
+            localMap.delete(row.id);
+            applied++;
+          }
+          delete pushed[row.id];
+          continue;
+        }
+        if (tombs[row.id] && ms(tombs[row.id]) >= remoteTs) continue; // deleted here, more recently
+        if (!l || remoteTs > ms(l.updatedAt)) {
+          const stored = graftPhotoBlobs({ ...row.data }, l);
+          migrateItem(stored);
+          await putItem(stored);
+          localMap.set(stored.id, stored);
+          pushed[stored.id] = stored.updatedAt;
+          applied++;
+        } else if (remoteTs === ms(l.updatedAt)) {
+          pushed[l.id] = l.updatedAt;
+        }
+      }
+      if (rows.length < PAGE) break;
+    }
+
+    // 2. Push local edits the server hasn't seen, plus local deletions.
+    const rows = [];
+    for (const item of localMap.values()) {
+      if (pushed[item.id] === item.updatedAt) continue;
+      rows.push({
+        user_id: uid,
+        id: item.id,
+        data: serialize(item),
+        deleted: false,
+        updated_at: item.updatedAt || new Date().toISOString(),
+      });
+    }
+    for (const [id, ts] of Object.entries(tombs)) {
+      if (localMap.has(id)) continue; // re-created since
+      rows.push({ user_id: uid, id, data: {}, deleted: true, updated_at: ts });
+    }
+    let pushedCount = 0;
+    if (rows.length) onProgress('Uploading catalog…');
+    for (let i = 0; i < rows.length; i += PUSH_CHUNK) {
+      const chunk = rows.slice(i, i + PUSH_CHUNK);
+      const { error } = await sb.from('items').upsert(chunk, { onConflict: 'user_id,id' });
+      if (error) throw cloudError(error, 'Uploading the catalog');
+      for (const r of chunk) {
+        if (r.deleted) delete tombs[r.id];
+        else pushed[r.id] = r.updated_at;
+      }
+      pushedCount += chunk.length;
+    }
+    writeJson(PUSHED_KEY, pushed);
+    writeJson(TOMB_KEY, tombs);
+
+    // 3. Bookcases and tokens: adopt newer remote changes, then store ours.
+    const state = await sb.from('user_state').select('bookcases,tokens').maybeSingle();
+    if (state.error) throw cloudError(state.error, 'Syncing settings');
+    const remoteState = state.data || null;
+    if (remoteState && adoptBookcasesBundle(remoteState.bookcases)) applied++;
+    const tokensAdopted = remoteState ? adoptTokensBundle(remoteState.tokens) : false;
+    if (tokensAdopted) applied++;
+    const mine = { bookcases: getBookcasesBundle(), tokens: tokensBundle() };
+    const same = remoteState
+      && JSON.stringify(remoteState.bookcases) === JSON.stringify(mine.bookcases)
+      && JSON.stringify(remoteState.tokens) === JSON.stringify(mine.tokens);
+    if (!same) {
+      const { error } = await sb.from('user_state').upsert({
+        user_id: uid, ...mine, updated_at: new Date().toISOString(),
+      }, { onConflict: 'user_id' });
+      if (error) throw cloudError(error, 'Syncing settings');
+    }
+
+    // 4. Photos: upload new ones, download missing ones.
+    applied += await syncPhotos(sb, uid, localMap, onProgress);
+
+    if (newest) localStorage.setItem(CURSOR_KEY, newest);
+    localStorage.setItem(LAST_KEY, new Date().toISOString());
+    setDeviceOwner(uid);
+    return { applied, pushed: pushedCount > 0, tokensAdopted };
   } finally {
     syncing = false;
     if (queued) { queued = false; syncNow(onProgress).catch(() => {}); }
   }
 }
 
-async function syncCovers(cfg, merged, localMap, onProgress) {
-  const pushed = readJson(COVERS_KEY, {});
+async function syncPhotos(sb, uid, localMap, onProgress) {
+  const known = readJson(PHOTOS_KEY, {});
+  const store = sb.storage.from(BUCKET);
   let pulls = 0;
-  for (const [id, item] of merged) {
-    const local = localMap.get(id) || item;
-    let pullDirty = false;
-    for (const photo of local.photos || []) {
-      if (!photo.file) continue;
-      const key = `${id}/${photo.id}`;
-      const mark = pushed[key];
-      if (photo.blob) {
-        if (mark && mark.ts >= (local.updatedAt || '')) continue;
-        onProgress('Uploading photos…');
-        let sha = (mark && mark.sha) || null;
-        let result = await writeFile(cfg, photo.file, await blobToB64(photo.blob), sha, `Photo for ${local.title || id}`);
-        if (result === null) {
-          sha = await fetchRemoteSha(cfg, photo.file);
-          result = await writeFile(cfg, photo.file, await blobToB64(photo.blob), sha, `Photo for ${local.title || id}`);
-        }
-        if (result) pushed[key] = { sha: result.sha, ts: local.updatedAt || new Date().toISOString() };
-      } else {
-        onProgress('Downloading photos…');
-        const blob = await readFileBlob(cfg, photo.file);
-        if (blob) {
-          photo.blob = blob;
-          pullDirty = true;
-          // A photo that just came down is already in the repo — mark it so
-          // the next sync doesn't try to push it back up.
-          pushed[key] = { sha: null, ts: local.updatedAt || new Date().toISOString() };
+  try {
+    for (const item of localMap.values()) {
+      let dirty = false;
+      for (const photo of item.photos || []) {
+        const path = photoPath(item.id, photo);
+        if (photo.blob) {
+          if (known[path]) continue;
+          onProgress('Uploading photos…');
+          const { error } = await store.upload(`${uid}/${path}`, photo.blob, {
+            upsert: true,
+            contentType: photo.blob.type || 'image/jpeg',
+          });
+          if (error) throw cloudError(error, 'Uploading photos');
+          known[path] = 1;
+        } else if (photo.file) {
+          onProgress('Downloading photos…');
+          const { data, error } = await store.download(`${uid}/${path}`);
+          if (error || !data || !data.size) continue; // not uploaded yet by its device
+          photo.blob = data;
+          known[path] = 1;
+          dirty = true;
         }
       }
+      if (dirty) {
+        migrateItem(item); // refresh the legacy cover mirror
+        await putItem(item);
+        pulls++;
+      }
     }
-    if (pullDirty) {
-      migrateItem(local); // refresh the legacy cover mirror
-      await putItem(local);
-      pulls++;
-    }
+  } finally {
+    writeJson(PHOTOS_KEY, known);
   }
-  writeJson(COVERS_KEY, pushed);
   return pulls;
 }
