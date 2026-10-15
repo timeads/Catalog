@@ -7,8 +7,8 @@
 // row-level security (each person sees only their own data, and only
 // approved emails can read or write anything).
 
-export const SUPABASE_URL = '';
-export const SUPABASE_KEY = '';
+export const SUPABASE_URL = 'https://vxqitvcycmaircasiysq.supabase.co';
+export const SUPABASE_KEY = 'sb_publishable_hbQgFgHi5ueNuQGxV3QgFg_LWrIOU06';
 
 const SESSION_KEY = 'stacks-auth';
 
